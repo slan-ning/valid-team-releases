@@ -1,0 +1,129 @@
+name: Clean User macOS VM DMG Install & GUI E2E Gate (Free Public Runner)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to verify (default: latest)"
+        required: false
+        default: "latest"
+        type: string
+
+concurrency:
+  group: clean-vm-e2e-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  clean-user-e2e-test:
+    name: "Clean User VM DMG Install & Real-LLM 6-Stage GUI E2E (No Go / No Source)"
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: 1. Checkout Public E2E Verification Harness (Zero App Source Code)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: 2. Download Official ValidTeam.dmg & OTA Assets from Public Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_TAG: ${{ github.event.release.tag_name || inputs.release_tag || 'latest' }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/Downloads/validteam-installer
+          cd ~/Downloads/validteam-installer
+          if [ "${TARGET_TAG}" = "latest" ] || [ -z "${TARGET_TAG}" ]; then
+            gh release download --repo "${GITHUB_REPOSITORY}" \
+              -p "ValidTeam.dmg" \
+              -p "ValidTeam-macos.zip" \
+              -p "latest-macos.json" \
+              -p "SHA256SUMS.txt" \
+              --clobber
+          else
+            gh release download "${TARGET_TAG}" --repo "${GITHUB_REPOSITORY}" \
+              -p "ValidTeam.dmg" \
+              -p "ValidTeam-macos.zip" \
+              -p "latest-macos.json" \
+              -p "SHA256SUMS.txt" \
+              --clobber
+          fi
+          ls -lh ~/Downloads/validteam-installer
+          cat latest-macos.json
+          shasum -a 256 ValidTeam.dmg ValidTeam-macos.zip
+
+      - name: 3. Purge Pre-installed Developer Tools (Ensure Pure User Mac Environment)
+        run: |
+          echo "==> Removing any pre-installed Go, Node, or AI CLIs on runner to match real user Mac..."
+          sudo rm -rf /usr/local/go /usr/local/bin/go /usr/local/bin/gofmt /usr/local/Cellar/go* /opt/homebrew/opt/go /opt/homebrew/bin/go /opt/homebrew/bin/gofmt /opt/homebrew/Cellar/go* || true
+          rm -rf "$HOME/go" "$HOME/.nvm" "$HOME/.local/share/opencode" "$HOME/.config/opencode" || true
+          export PATH="/usr/bin:/bin:/usr/sbin:/sbin"
+          if command -v go >/dev/null 2>&1; then
+            echo "❌ ERROR: 'go' binary still exists at $(command -v go)"
+            exit 1
+          fi
+          echo "✅ Verified: Pure user macOS environment (No Go compiler, No OpenCode CLI, No app source code)."
+
+      - name: 4. Simulate Browser Quarantine, Verify Apple Notarization Ticket & Gatekeeper, and Check Online OTA
+        run: |
+          set -euo pipefail
+          DMG_FILE="$HOME/Downloads/validteam-installer/ValidTeam.dmg"
+          QUARANTINE_VAL="0081;67300000;Safari;12345678-1234-1234-1234-1234567890AB"
+          xattr -w com.apple.quarantine "$QUARANTINE_VAL" "$DMG_FILE"
+
+          echo "==> Verifying Apple Notarization Ticket & Gatekeeper on quarantined DMG..."
+          xcrun stapler validate "$DMG_FILE"
+          spctl -a -t open --context context:primary-signature -vv "$DMG_FILE"
+
+          rm -rf "/Applications/Valid Team.app"
+          MOUNT_DIR="/Volumes/Valid Team"
+          hdiutil attach "$DMG_FILE" -nobrowse -readonly -mountpoint "$MOUNT_DIR"
+          ditto "$MOUNT_DIR/Valid Team.app" "/Applications/Valid Team.app"
+          hdiutil detach "$MOUNT_DIR"
+
+          # Ensure browser quarantine attribute remains attached to /Applications/Valid Team.app (NEVER strip quarantine!)
+          xattr -w com.apple.quarantine "$QUARANTINE_VAL" "/Applications/Valid Team.app"
+          echo "==> Active com.apple.quarantine attribute on /Applications/Valid Team.app:"
+          xattr -p com.apple.quarantine "/Applications/Valid Team.app"
+
+          echo "==> Verifying Developer ID Signature, Stapled Ticket & Gatekeeper WITH com.apple.quarantine intact..."
+          codesign --verify --deep --strict --verbose=2 "/Applications/Valid Team.app"
+          codesign -dv --verbose=4 "/Applications/Valid Team.app" 2>&1 || true
+          xcrun stapler validate "/Applications/Valid Team.app"
+          spctl -a -t exec -vv "/Applications/Valid Team.app"
+
+          echo "==> Verifying live online OTA Release Check against public repository..."
+          VTEAM_OTA_TEST_CURRENT_VERSION="0.9.9" \
+          VTEAM_OTA_TEST_CURRENT_BUILD="20261110.1" \
+            "/Applications/Valid Team.app/Contents/MacOS/ValidTeam" --verify-online-release-check
+
+      - name: 5. Run 6-Stage Real-LLM GUI E2E in Pure User Environment (OpenCode Go · deepseek-v4.1-flash)
+        env:
+          CI: "true"
+          PATH: "/usr/bin:/bin:/usr/sbin:/sbin"
+          VTEAM_TEST_API_KEY: ${{ secrets.VTEAM_TEST_API_KEY }}
+          VTEAM_TEST_API_NAME: ${{ vars.VTEAM_TEST_API_NAME || 'opencode-go' }}
+          VTEAM_TEST_API_FORMAT: ${{ vars.VTEAM_TEST_API_FORMAT || 'openai' }}
+          VTEAM_TEST_API_BASE_URL: ${{ vars.VTEAM_TEST_API_BASE_URL || 'https://opencode.ai/inference/go/openai/v1' }}
+          VTEAM_TEST_API_MODEL: ${{ vars.VTEAM_TEST_API_MODEL || 'deepseek-v4.1-flash' }}
+        run: |
+          chmod +x ./scripts/ci_complex_e2e_test.sh
+          ./scripts/ci_complex_e2e_test.sh
+
+      - name: 6. Prepare Clean-User GUI Screenshots & Logs
+        if: always()
+        run: |
+          mkdir -p test-artifacts/logs
+          cp -f ~/Library/Logs/ValidTeam/*.log test-artifacts/logs/ 2>/dev/null || true
+
+      - name: 7. Upload Clean-User GUI Screenshots Bundle (5-Day Retention)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ValidTeam-macOS-GUI-Test-Bundle
+          retention-days: 5
+          path: test-artifacts/
