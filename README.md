@@ -24,7 +24,7 @@
 
 ## 🔐 开发者签名、Apple 官方公证与完整性校验
 
-所有官方发布的安装包均由 **Apple Developer ID Application (`J9ZH8HRHH9`)** 正式签名，并通过 **Apple 官方公证（Notarized Developer ID）与票据装订（Stapled Ticket）**，任何新 Mac 下载拖入 `/Applications` 均可零拦截直接打开：
+所有官方发布的安装包均由 **Apple Developer ID Application** 正式签名，并通过 **Apple 官方公证（Notarized Developer ID）与票据装订（Stapled Ticket）**，任何新 Mac 下载拖入 `/Applications` 均可零拦截直接打开：
 
 ```bash
 # 校验 SHA-256 摘要
@@ -33,5 +33,5 @@ shasum -a 256 -c SHA256SUMS.txt
 # 校验 Apple Developer ID 签名与公证票据装订 (Stapler & Gatekeeper)
 codesign --verify --deep --strict --verbose=2 "/Applications/Valid Team.app"
 xcrun stapler validate "/Applications/Valid Team.app"
-spctl -a -t exec -vv "/Applications/Valid Team.app"
+spctl -a -t exec -v "/Applications/Valid Team.app"
 ```

@@ -43,7 +43,7 @@ echo "==> [Stage 1/6] Launching ${APP_PATH} and verifying unconfigured /setup on
 if [ "${CI:-}" = "true" ]; then
   echo "   • Active com.apple.quarantine on ${APP_PATH}: $(xattr -p com.apple.quarantine "${APP_PATH}")"
   xcrun stapler validate "${APP_PATH}"
-  spctl -a -t exec -vv "${APP_PATH}"
+  spctl -a -t exec -v "${APP_PATH}"
 fi
 VTEAM_SKIP_MOVE_PROMPT=1 "${APP_PATH}/Contents/MacOS/ValidTeam" --skip-move-prompt >/dev/null 2>&1 &
 
