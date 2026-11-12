@@ -68,7 +68,7 @@ jobs:
           fi
           echo "✅ Verified: Pure user macOS environment (No Go compiler, No OpenCode CLI, No app source code)."
 
-      - name: 4. Simulate Browser Quarantine, Verify Apple Notarization Ticket & Gatekeeper, and Check v1.0.0 -> Latest Online OTA
+      - name: 4. Simulate Browser Quarantine, Verify Apple Notarization Ticket & Gatekeeper, and Check v1.0.1 -> Latest Online OTA
         run: |
           set -euo pipefail
           DMG_FILE="$HOME/Downloads/validteam-installer/ValidTeam.dmg"
@@ -95,9 +95,9 @@ jobs:
           xcrun stapler validate "/Applications/Valid Team.app"
           spctl -a -t exec -v "/Applications/Valid Team.app"
 
-          echo "==> Verifying live online OTA Release Check (v1.0.0 -> latest) against public repository..."
-          VTEAM_OTA_TEST_CURRENT_VERSION="1.0.0" \
-          VTEAM_OTA_TEST_CURRENT_BUILD="20261112.33" \
+          echo "==> Verifying live online OTA Release Check (v1.0.1 -> latest) against public repository..."
+          VTEAM_OTA_TEST_CURRENT_VERSION="1.0.1" \
+          VTEAM_OTA_TEST_CURRENT_BUILD="20261112.34" \
             "/Applications/Valid Team.app/Contents/MacOS/ValidTeam" --verify-online-release-check
 
       - name: 5. Run 6-Stage Real-LLM GUI E2E in Pure User Environment (OpenCode Go · deepseek-v4.1-flash)
@@ -126,3 +126,66 @@ jobs:
           name: ValidTeam-macOS-GUI-Test-Bundle
           retention-days: 5
           path: test-artifacts/
+
+  linux-native-smoke:
+    name: "Linux ${{ matrix.arch }} Native Smoke (clean tar extract · --help · 127.0.0.1:8787 -> 200)"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            uname: x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            uname: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - name: 1. Download Linux Package & Checksums from Public Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_TAG: ${{ github.event.release.tag_name || inputs.release_tag || 'latest' }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/vt && cd ~/vt
+          if [ "${TARGET_TAG}" = "latest" ] || [ -z "${TARGET_TAG}" ]; then
+            gh release download --repo "${GITHUB_REPOSITORY}" -p "ValidTeam-linux-${{ matrix.arch }}.tar.gz" -p "SHA256SUMS-linux.txt"
+          else
+            gh release download "${TARGET_TAG}" --repo "${GITHUB_REPOSITORY}" -p "ValidTeam-linux-${{ matrix.arch }}.tar.gz" -p "SHA256SUMS-linux.txt"
+          fi
+          sha256sum -c --ignore-missing SHA256SUMS-linux.txt
+
+      - name: 2. Extract with GNU tar (stderr MUST be empty)
+        run: |
+          set -euo pipefail
+          cd ~/vt
+          tar -xzf "ValidTeam-linux-${{ matrix.arch }}.tar.gz" 2> tar.stderr
+          if [ -s tar.stderr ]; then
+            echo "❌ GNU tar extract produced warnings:"; cat tar.stderr; exit 1
+          fi
+          echo "✅ GNU tar extract stderr is empty"
+          test "$(uname -m)" = "${{ matrix.uname }}"
+          file "ValidTeam-linux-${{ matrix.arch }}/vteam"
+
+      - name: 3. Run ./vteam --help and default listen 127.0.0.1:8787 -> HTTP 200
+        run: |
+          set -euo pipefail
+          cd ~/vt/ValidTeam-linux-${{ matrix.arch }}
+          ./vteam --help | head -n 5
+          ./vteam --version
+          export HOME="$(mktemp -d)"
+          ./vteam > "${RUNNER_TEMP}/vteam.log" 2>&1 &
+          VT_PID=$!
+          CODE=000
+          for i in $(seq 1 30); do
+            CODE="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/ || true)"
+            [ "${CODE}" = "200" ] && break
+            sleep 1
+          done
+          cat "${RUNNER_TEMP}/vteam.log"
+          kill "${VT_PID}" || true
+          if [ "${CODE}" != "200" ]; then
+            echo "❌ http://127.0.0.1:8787/ returned ${CODE}"; exit 1
+          fi
+          echo "✅ Linux ${{ matrix.arch }}: ./vteam listens on 127.0.0.1:8787 and returns HTTP 200"
