@@ -68,7 +68,7 @@ jobs:
           fi
           echo "✅ Verified: Pure user macOS environment (No Go compiler, No OpenCode CLI, No app source code)."
 
-      - name: 4. Simulate Browser Quarantine, Verify Apple Notarization Ticket & Gatekeeper, and Check v1.0.2 -> Latest Online OTA
+      - name: 4. Simulate Browser Quarantine, Verify Apple Notarization Ticket & Gatekeeper, and Check v1.1.0 -> Latest Online OTA
         run: |
           set -euo pipefail
           DMG_FILE="$HOME/Downloads/validteam-installer/ValidTeam.dmg"
@@ -95,9 +95,9 @@ jobs:
           xcrun stapler validate "/Applications/Valid Team.app"
           spctl -a -t exec -v "/Applications/Valid Team.app"
 
-          echo "==> Verifying live online OTA Release Check (v1.0.2 -> latest) against public repository..."
-          VTEAM_OTA_TEST_CURRENT_VERSION="1.0.2" \
-          VTEAM_OTA_TEST_CURRENT_BUILD="20261112.35" \
+          echo "==> Verifying live online OTA Release Check (v1.1.0 -> latest) against public repository..."
+          VTEAM_OTA_TEST_CURRENT_VERSION="1.1.0" \
+          VTEAM_OTA_TEST_CURRENT_BUILD="20261113.36" \
             "/Applications/Valid Team.app/Contents/MacOS/ValidTeam" --verify-online-release-check
 
       - name: 5. Run 6-Stage Real-LLM GUI E2E in Pure User Environment (OpenCode Go · deepseek-v4.1-flash)

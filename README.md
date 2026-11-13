@@ -6,7 +6,7 @@
 
 ---
 
-## 🍎 macOS 桌面客户端下载与安装（Latest Release: `v1.1.0`）
+## 🍎 macOS 桌面客户端下载与安装（Latest Release: `v1.1.1`）
 
 - **macOS 拖拽安装包 (`ValidTeam.dmg`)**：  
   👉 [**直接下载 ValidTeam.dmg**](https://github.com/slan-ning/valid-team-releases/releases/latest/download/ValidTeam.dmg)
@@ -18,7 +18,7 @@
 ### 安装与升级步骤
 1. 下载并双击打开 `ValidTeam.dmg`，将 **`Valid Team.app`** 拖入右侧 **`Applications`（应用程序）** 文件夹；
 2. 从「应用程序」或 Spotlight 启动 `Valid Team` 即可直接开始使用；
-3. 已安装历史版本（如 `v1.0.0`）的用户可在菜单栏点击「检查更新…」一键原子热更新至 `v1.1.0`。
+3. 已安装历史版本（如 `v1.0.0`）的用户可在菜单栏点击「检查更新…」一键原子热更新至 `v1.1.1`。
 
 ---
 
