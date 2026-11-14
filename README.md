@@ -2,18 +2,18 @@
 
 **Valid Team** 是一款开箱即用的本地多智能体团队协作工作台，原生提供 **macOS 桌面客户端（Universal Binary：Apple Silicon `arm64` + Intel `x86_64`）** 与 **Linux 独立运行版（CLI + Web 纯静态零依赖：`x86_64` + `arm64`）**。
 
-> 🔒 **双仓安全架构说明**：本仓库（`slan-ning/valid-team-releases`）为官方公开安装包分发、macOS OTA 自动热更新与纯净虚拟机 E2E 验收仓库（不含业务源码与内部设计文档）。
+> 🔒 **双仓安全架构说明**：本仓库（`valid-studio/valid-team-releases`）为官方公开安装包分发、macOS OTA 自动热更新与纯净虚拟机 E2E 验收仓库（不含业务源码与内部设计文档）。
 
 ---
 
 ## 🍎 macOS 桌面客户端下载与安装（Latest Release: `v1.1.8`）
 
 - **macOS 拖拽安装包 (`ValidTeam.dmg`)**：  
-  👉 [**直接下载 ValidTeam.dmg**](https://github.com/slan-ning/valid-team-releases/releases/latest/download/ValidTeam.dmg)
+  👉 [**直接下载 ValidTeam.dmg**](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam.dmg)
 - **在线 OTA 热更清单 (`latest-macos.json`)**：  
-  `https://github.com/slan-ning/valid-team-releases/releases/latest/download/latest-macos.json`
+  `https://github.com/valid-studio/valid-team-releases/releases/latest/download/latest-macos.json`
 - **macOS SHA-256 校验清单 (`SHA256SUMS.txt`)**：  
-  `https://github.com/slan-ning/valid-team-releases/releases/latest/download/SHA256SUMS.txt`
+  `https://github.com/valid-studio/valid-team-releases/releases/latest/download/SHA256SUMS.txt`
 
 ### 安装与升级步骤
 1. 下载并双击打开 `ValidTeam.dmg`，将 **`Valid Team.app`** 拖入右侧 **`Applications`（应用程序）** 文件夹；
@@ -25,11 +25,11 @@
 ## 🐧 Linux 命令行 + 网页版快速上手（纯静态零依赖）
 
 - **Linux x86_64 (`ValidTeam-linux-amd64.tar.gz`)**：  
-  👉 [**下载 ValidTeam-linux-amd64.tar.gz**](https://github.com/slan-ning/valid-team-releases/releases/latest/download/ValidTeam-linux-amd64.tar.gz)
+  👉 [**下载 ValidTeam-linux-amd64.tar.gz**](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-linux-amd64.tar.gz)
 - **Linux ARM64 (`ValidTeam-linux-arm64.tar.gz`)**：  
-  👉 [**下载 ValidTeam-linux-arm64.tar.gz**](https://github.com/slan-ning/valid-team-releases/releases/latest/download/ValidTeam-linux-arm64.tar.gz)
+  👉 [**下载 ValidTeam-linux-arm64.tar.gz**](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-linux-arm64.tar.gz)
 - **Linux SHA-256 校验清单 (`SHA256SUMS-linux.txt`)**：  
-  `https://github.com/slan-ning/valid-team-releases/releases/latest/download/SHA256SUMS-linux.txt`
+  `https://github.com/valid-studio/valid-team-releases/releases/latest/download/SHA256SUMS-linux.txt`
 
 ### 30 秒解压即跑与自定义监听绑定
 ```bash
