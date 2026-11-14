@@ -95,9 +95,9 @@ jobs:
           xcrun stapler validate "/Applications/Valid Team.app"
           spctl -a -t exec -v "/Applications/Valid Team.app"
 
-          echo "==> Verifying live online OTA Release Check (v1.1.1 -> latest) against public repository..."
-          VTEAM_OTA_TEST_CURRENT_VERSION="1.1.1" \
-          VTEAM_OTA_TEST_CURRENT_BUILD="20261113.37" \
+          echo "==> Verifying live online OTA Release Check (v1.1.4 -> latest) against public repository..."
+          VTEAM_OTA_TEST_CURRENT_VERSION="1.1.4" \
+          VTEAM_OTA_TEST_CURRENT_BUILD="20261114.39" \
             "/Applications/Valid Team.app/Contents/MacOS/ValidTeam" --verify-online-release-check
 
       - name: 5. Run 6-Stage Real-LLM GUI E2E in Pure User Environment (OpenCode Go · deepseek-v4.1-flash)
