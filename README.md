@@ -1,66 +1,85 @@
-# Valid Team (Official Releases — macOS & Linux)
+# Valid Team — Official Releases (macOS & Linux)
 
-**Valid Team** 是一款开箱即用的本地多智能体团队协作工作台，原生提供 **macOS 桌面客户端（Universal Binary：Apple Silicon `arm64` + Intel `x86_64`）** 与 **Linux 独立运行版（CLI + Web 纯静态零依赖：`x86_64` + `arm64`）**。
+**Run AI like a real team.**  
+**Valid Team** is a local-first, multi-agent desktop workbench. Describe your goal once—specialized AI roles plan, execute, review, and deliver ready-to-use files straight to your local workspace.
 
-> 🔒 **双仓安全架构说明**：本仓库（`valid-studio/valid-team-releases`）为官方公开安装包分发、macOS OTA 自动热更新与纯净虚拟机 E2E 验收仓库（不含业务源码与内部设计文档）。
+🌐 **Website**: [valid-team.com](https://valid-team.com/) ([简体中文](https://valid-team.com/zh/)) · [Valid Studio](https://valid-studio.com/)  
+💬 **Community & Q&A**: [GitHub Discussions](https://github.com/valid-studio/valid-team-releases/discussions) · 🐛 **Bug Reports**: [GitHub Issues](https://github.com/valid-studio/valid-team-releases/issues)
 
----
-
-## 🍎 macOS 桌面客户端下载与安装（Latest Release: `v1.1.9`）
-
-- **macOS 拖拽安装包 (`ValidTeam.dmg`)**：  
-  👉 [**直接下载 ValidTeam.dmg**](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam.dmg)
-- **在线 OTA 热更清单 (`latest-macos.json`)**：  
-  `https://github.com/valid-studio/valid-team-releases/releases/latest/download/latest-macos.json`
-- **macOS SHA-256 校验清单 (`SHA256SUMS.txt`)**：  
-  `https://github.com/valid-studio/valid-team-releases/releases/latest/download/SHA256SUMS.txt`
-
-### 安装与升级步骤
-1. 下载并双击打开 `ValidTeam.dmg`，将 **`Valid Team.app`** 拖入右侧 **`Applications`（应用程序）** 文件夹；
-2. 从「应用程序」或 Spotlight 启动 `Valid Team` 即可直接开始使用；
-3. 已安装历史版本（如 `v1.0.0`）的用户可在菜单栏点击「检查更新…」一键原子热更新至 `v1.1.9`。
+> 🔒 **Public Distribution Notice**: This repository (`valid-studio/valid-team-releases`) hosts official signed installers, macOS OTA auto-update manifests, checksums, clean-VM E2E verification, and community feedback.
 
 ---
 
-## 🐧 Linux 命令行 + 网页版快速上手（纯静态零依赖）
+## 🍎 macOS Desktop App (Latest: `v1.1.9`)
 
-- **Linux x86_64 (`ValidTeam-linux-amd64.tar.gz`)**：  
-  👉 [**下载 ValidTeam-linux-amd64.tar.gz**](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-linux-amd64.tar.gz)
-- **Linux ARM64 (`ValidTeam-linux-arm64.tar.gz`)**：  
-  👉 [**下载 ValidTeam-linux-arm64.tar.gz**](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-linux-arm64.tar.gz)
-- **Linux SHA-256 校验清单 (`SHA256SUMS-linux.txt`)**：  
-  `https://github.com/valid-studio/valid-team-releases/releases/latest/download/SHA256SUMS-linux.txt`
+Universal Binary supporting **Apple Silicon (`arm64`)** and **Intel (`x86_64`)** — officially signed with **Apple Developer ID** and **Notarized** with stapled Gatekeeper tickets.
 
-### 30 秒解压即跑与自定义监听绑定
+- **Installer (`ValidTeam.dmg`)**: 👉 [**Download ValidTeam.dmg**](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam.dmg)
+- **OTA Update Manifest**: `https://github.com/valid-studio/valid-team-releases/releases/latest/download/latest-macos.json`
+- **SHA-256 Checksums**: [`SHA256SUMS.txt`](https://github.com/valid-studio/valid-team-releases/releases/latest/download/SHA256SUMS.txt)
+
+### Install & Update
+1. Download and open `ValidTeam.dmg`, then drag **`Valid Team.app`** into **`Applications`**.
+2. Launch `Valid Team` from Applications or Spotlight, add your own API key (DeepSeek, OpenAI, Claude, Gemini, Qwen, Kimi, etc.), and start your first project.
+3. Existing users can click **"Check for Updates…"** in the menu bar to update in-place without losing projects or keys.
+
+---
+
+## 🐧 Linux Standalone (CLI + Web UI · Zero Dependencies)
+
+- **Linux x86_64 (`ValidTeam-linux-amd64.tar.gz`)**: 👉 [**Download amd64**](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-linux-amd64.tar.gz)
+- **Linux ARM64 (`ValidTeam-linux-arm64.tar.gz`)**: 👉 [**Download arm64**](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-linux-arm64.tar.gz)
+- **SHA-256 Checksums**: [`SHA256SUMS-linux.txt`](https://github.com/valid-studio/valid-team-releases/releases/latest/download/SHA256SUMS-linux.txt)
+
 ```bash
-# 1. 解压对应架构发行包（支持 Ubuntu / Debian / CentOS / Rocky / Alpine / NAS / 云服务器）
+# Extract and run locally (defaults to 127.0.0.1:8787)
 tar -xzf ValidTeam-linux-amd64.tar.gz && cd ValidTeam-linux-amd64
-# ARM64 设备请使用：tar -xzf ValidTeam-linux-arm64.tar.gz && cd ValidTeam-linux-arm64
-
-# 2. 启动方式 A：本机桌面或 SSH 端口转发（默认安全绑定 127.0.0.1:8787，仅本机可访问）
 ./vteam
 
-# 3. 启动方式 B：局域网 / 内网服务器供其他设备浏览器访问（自定义监听绑定地址）
+# Or bind to LAN / server interface (use behind firewall or reverse proxy)
 ./vteam --addr 0.0.0.0:8787
-# 或分别指定主机与端口（亦可通过环境变量 VTEAM_ADDR=0.0.0.0:9000 指定）：
-./vteam --host 0.0.0.0 --port 9000
 ```
-
-> ⚠️ **内网安全提示**：开启 `0.0.0.0` 或非本机网卡 IP 监听后，同一网络内的设备可直接访问工作台，请确保运行在受信任内网或配合防火墙 / 反向代理鉴权使用。
 
 ---
 
-## 🔐 开发者签名、Apple 官方公证与双端完整性校验
-
-macOS 官方安装包均由 **Apple Developer ID Application** 官方签名，并通过 **Apple 官方公证（Notarized Developer ID）与票据装订（Stapled Ticket）**，任何新 Mac 下载拖入 `/Applications` 均可零拦截直接打开：
+## 🔐 Signature & Checksum Verification
 
 ```bash
-# 校验 macOS / Linux 安装包 SHA-256 摘要
 shasum -a 256 -c SHA256SUMS.txt
 shasum -a 256 -c SHA256SUMS-linux.txt
 
-# 校验 macOS Apple Developer ID 签名与公证票据装订 (Stapler & Gatekeeper)
 codesign --verify --deep --strict --verbose=2 "/Applications/Valid Team.app"
 xcrun stapler validate "/Applications/Valid Team.app"
 spctl -a -t exec -v "/Applications/Valid Team.app"
 ```
+
+---
+
+<details>
+<summary>🇨🇳 简体中文说明（点击展开下载、安装与社区反馈指引）</summary>
+
+### 产品简介与官方入口
+**Valid Team** 是一款开箱即用、纯本地优先的多智能体协作桌面端（支持 **macOS Universal** 与 **Linux x86_64 / ARM64**）。用一句话说清目标，AI 团队即可自动分工协作、互相核验，并将最终报告、表格、图表和代码归档至本地目录。
+
+- **中文官网**：[valid-team.com/zh/](https://valid-team.com/zh/) · [Valid Studio 工作室](https://valid-studio.com/zh/)
+- **使用交流 / 求助问答**：[GitHub Discussions](https://github.com/valid-studio/valid-team-releases/discussions)
+- **Bug 反馈与功能建议**：[GitHub Issues](https://github.com/valid-studio/valid-team-releases/issues)
+
+### macOS 安装与在线热更新（当前版本 `v1.1.9`）
+1. 下载 [**ValidTeam.dmg**](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam.dmg) 并双击打开，将 **`Valid Team.app`** 拖入 **`Applications`（应用程序）**；
+2. 安装包均已通过 **Apple Developer ID 官方签名与 Notarization 公证**并装订离线票据，下载即可直接打开；
+3. 已安装旧版本的用户可在顶部菜单栏点击「检查更新…」一键自动热更新至 `v1.1.9`，历史项目与模型密钥原样保留。
+
+### Linux 30 秒解压即跑
+```bash
+# x86_64 设备（ARM64 请替换为 ValidTeam-linux-arm64.tar.gz）
+tar -xzf ValidTeam-linux-amd64.tar.gz && cd ValidTeam-linux-amd64
+
+# 默认安全绑定本机 127.0.0.1:8787
+./vteam
+
+# 如需局域网 / 内网服务器供其他设备访问（请配合防火墙或反向代理使用）
+./vteam --addr 0.0.0.0:8787
+```
+
+</details>
