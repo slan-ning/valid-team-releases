@@ -1,0 +1,26 @@
+name: Feature Request & Team Recipe / 功能建议与团队配方
+description: Suggest a new capability or share a useful Valid Team workflow recipe · 提交体验建议或团队配方
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use Case & Goal / 使用场景与目标
+      description: What workflow or problem are you trying to solve with Valid Team?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Suggested Solution / 期望的交互或功能方案
+      description: Describe how you'd like it to work for everyday users.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App Version & OS / 当前版本号与操作系统（可选）
+      placeholder: "e.g. v1.2.0 on Windows 11 / macOS"
+    validations:
+      required: false

@@ -1,50 +1,69 @@
-# Valid Team — Official Releases (macOS & Linux)
+# Valid Team — Official Releases (macOS, Windows & Linux)
 
-**Run AI like a real team.**  
-**Valid Team** is a local-first, multi-agent desktop workbench. Describe your goal once—specialized AI roles plan, execute, review, and deliver ready-to-use files straight to your local workspace.
+**Run AI like a real team.**
+**Valid Team** is a local-first, multi-agent desktop workbench for **macOS, Windows 10/11, and Linux**. Describe your goal once—specialized AI roles plan, execute, review, and deliver finished files straight to your local workspace.
 
-🌐 **Website**: [valid-team.com](https://valid-team.com/) ([简体中文](https://valid-team.com/zh/)) · [Valid Studio](https://valid-studio.com/)  
-💬 **Community & Q&A**: [GitHub Discussions](https://github.com/valid-studio/valid-team-releases/discussions) · 🐛 **Bug Reports**: [GitHub Issues](https://github.com/valid-studio/valid-team-releases/issues)
+- **Website**: [valid-team.com](https://valid-team.com/) ([简体中文](https://valid-team.com/zh/)) · [Valid Studio](https://valid-studio.com/)
+- **Community & Q&A**: [GitHub Discussions](https://github.com/valid-studio/valid-team-releases/discussions)
+- **Bug Reports**: [GitHub Issues](https://github.com/valid-studio/valid-team-releases/issues)
 
-> 🔒 **Public Distribution Notice**: This repository (`valid-studio/valid-team-releases`) hosts official signed installers, macOS OTA auto-update manifests, checksums, clean-VM E2E verification, and community feedback.
+> This repository (`valid-studio/valid-team-releases`) hosts official installers, macOS OTA manifests, checksums, and community discussions.
 
 ---
 
-## 🍎 macOS Desktop App (Latest: `v1.1.9`)
+## macOS Desktop App (Latest: `v1.2.0`)
 
-Universal Binary supporting **Apple Silicon (`arm64`)** and **Intel (`x86_64`)** — officially signed with **Apple Developer ID** and **Notarized** with stapled Gatekeeper tickets.
+Universal Binary (**Apple Silicon `arm64`** + **Intel `x86_64`**), signed with **Apple Developer ID** and **Notarized**.
 
-- **Installer (`ValidTeam.dmg`)**: 👉 [**Download ValidTeam.dmg**](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam.dmg)
-- **OTA Update Manifest**: `https://github.com/valid-studio/valid-team-releases/releases/latest/download/latest-macos.json`
+- **Installer**: [Download ValidTeam.dmg](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam.dmg)
+- **OTA Manifest**: `https://github.com/valid-studio/valid-team-releases/releases/latest/download/latest-macos.json`
 - **SHA-256 Checksums**: [`SHA256SUMS.txt`](https://github.com/valid-studio/valid-team-releases/releases/latest/download/SHA256SUMS.txt)
 
-### Install & Update
-1. Download and open `ValidTeam.dmg`, then drag **`Valid Team.app`** into **`Applications`**.
-2. Launch `Valid Team` from Applications or Spotlight, add your own API key (DeepSeek, OpenAI, Claude, Gemini, Qwen, Kimi, etc.), and start your first project.
-3. Existing users can click **"Check for Updates…"** in the menu bar to update in-place without losing projects or keys.
+1. Open `ValidTeam.dmg` and drag **`Valid Team.app`** into **`Applications`**.
+2. Launch `Valid Team`, enter your own API key (DeepSeek, OpenAI, Claude, Gemini, Qwen, Kimi, etc.), and create your first project.
+3. Use **"Check for Updates…"** in the menu bar to update in-place without losing local data.
 
 ---
 
-## 🐧 Linux Standalone (CLI + Web UI · Zero Dependencies)
+## Windows 10 / 11 Desktop App (x64 · Latest: `v1.2.0`)
 
-- **Linux x86_64 (`ValidTeam-linux-amd64.tar.gz`)**: 👉 [**Download amd64**](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-linux-amd64.tar.gz)
-- **Linux ARM64 (`ValidTeam-linux-arm64.tar.gz`)**: 👉 [**Download arm64**](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-linux-arm64.tar.gz)
+Standalone desktop window built on system **WebView2** + system tray companion, no admin privileges or extra runtime required.
+
+- **Recommended Installer**: [Download ValidTeam-Setup.exe](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-Setup.exe)
+- **Portable Archive**: [Download ValidTeam-windows-amd64.zip](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-windows-amd64.zip)
+- **SHA-256 Checksums**: [`SHA256SUMS-windows.txt`](https://github.com/valid-studio/valid-team-releases/releases/latest/download/SHA256SUMS-windows.txt)
+
+> **Windows SmartScreen Note**: Initial Windows releases do not yet carry a commercial code-signing certificate. If Microsoft Defender SmartScreen prompts on first launch, click **"More info"** → **"Run anyway"** to install and start. You can verify package integrity anytime against `SHA256SUMS-windows.txt`.
+
+---
+
+## Linux Standalone (CLI + Web UI)
+
+- **Linux x86_64**: [ValidTeam-linux-amd64.tar.gz](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-linux-amd64.tar.gz)
+- **Linux ARM64**: [ValidTeam-linux-arm64.tar.gz](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-linux-arm64.tar.gz)
 - **SHA-256 Checksums**: [`SHA256SUMS-linux.txt`](https://github.com/valid-studio/valid-team-releases/releases/latest/download/SHA256SUMS-linux.txt)
 
 ```bash
-# Extract and run locally (defaults to 127.0.0.1:8787)
 tar -xzf ValidTeam-linux-amd64.tar.gz && cd ValidTeam-linux-amd64
 ./vteam
 
-# Or bind to LAN / server interface (use behind firewall or reverse proxy)
+# Optional: bind LAN / server interface (use behind firewall or reverse proxy)
 ./vteam --addr 0.0.0.0:8787
 ```
 
 ---
 
-## 🔐 Signature & Checksum Verification
+## Editions (Free & Pro)
+
+- **Free**: Ready out of the box with **3 AI agent seats** shared across all local projects, BYOK, zero background telemetry.
+- **Pro**: Up to **99 AI agent seats** across all local projects, with a one-time online device slot check on activation inside **System Settings → Edition & Pro Key** using a `VTPRO-...` key, working 100% offline thereafter (no account required). Share feedback or a workflow in [GitHub Discussions](https://github.com/valid-studio/valid-team-releases/discussions) to request an early Pro Key.
+
+---
+
+## Signature & Checksum Verification
 
 ```bash
+# macOS / Linux
 shasum -a 256 -c SHA256SUMS.txt
 shasum -a 256 -c SHA256SUMS-linux.txt
 
@@ -53,33 +72,43 @@ xcrun stapler validate "/Applications/Valid Team.app"
 spctl -a -t exec -v "/Applications/Valid Team.app"
 ```
 
+```powershell
+# Windows (PowerShell)
+Get-FileHash ValidTeam-Setup.exe -Algorithm SHA256
+# Compare with SHA256SUMS-windows.txt
+```
+
 ---
 
 <details>
-<summary>🇨🇳 简体中文说明（点击展开下载、安装与社区反馈指引）</summary>
+<summary>简体中文说明（macOS / Windows / Linux 下载、安装与版本说明）</summary>
 
-### 产品简介与官方入口
-**Valid Team** 是一款开箱即用、纯本地优先的多智能体协作桌面端（支持 **macOS Universal** 与 **Linux x86_64 / ARM64**）。用一句话说清目标，AI 团队即可自动分工协作、互相核验，并将最终报告、表格、图表和代码归档至本地目录。
+**Valid Team** 是一款纯本地优先的多智能体协作桌面端，支持 **macOS (Universal)**、**Windows 10/11 (`x64` 独立桌面窗口版)** 与 **Linux (`x86_64` / `ARM64`)**。用一句话描述目标，AI 团队即可自动分工协作、互相核验，并将最终报告、表格、图表和代码归档至本地目录。
 
-- **中文官网**：[valid-team.com/zh/](https://valid-team.com/zh/) · [Valid Studio 工作室](https://valid-studio.com/zh/)
-- **使用交流 / 求助问答**：[GitHub Discussions](https://github.com/valid-studio/valid-team-releases/discussions)
-- **Bug 反馈与功能建议**：[GitHub Issues](https://github.com/valid-studio/valid-team-releases/issues)
+- **中文官网**：[valid-team.com/zh/](https://valid-team.com/zh/) · [Valid Studio](https://valid-studio.com/zh/)
+- **使用交流**：[GitHub Discussions](https://github.com/valid-studio/valid-team-releases/discussions)
+- **问题反馈**：[GitHub Issues](https://github.com/valid-studio/valid-team-releases/issues)
 
-### macOS 安装与在线热更新（当前版本 `v1.1.9`）
-1. 下载 [**ValidTeam.dmg**](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam.dmg) 并双击打开，将 **`Valid Team.app`** 拖入 **`Applications`（应用程序）**；
-2. 安装包均已通过 **Apple Developer ID 官方签名与 Notarization 公证**并装订离线票据，下载即可直接打开；
-3. 已安装旧版本的用户可在顶部菜单栏点击「检查更新…」一键自动热更新至 `v1.1.9`，历史项目与模型密钥原样保留。
+### macOS 安装与更新（当前版本 `v1.2.0`）
+1. 下载 [ValidTeam.dmg](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam.dmg)，将 **`Valid Team.app`** 拖入 **`Applications`（应用程序）**；
+2. 安装包已通过 **Apple Developer ID 官方签名与 Notarization 公证**；
+3. 旧版本用户可在菜单栏点击「检查更新…」直接热更新至 `v1.2.0`。
 
-### Linux 30 秒解压即跑
+### Windows 10 / 11 安装与首次运行指引（x64 独立桌面窗口版）
+- **推荐图形安装包**：[下载 ValidTeam-Setup.exe](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-Setup.exe)（原生 WebView2 独立桌面窗口 + 系统托盘常驻、免管理员一键安装）
+- **免安装便携包**：[下载 ValidTeam-windows-amd64.zip](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-windows-amd64.zip)
+- **SHA-256 校验清单**：[`SHA256SUMS-windows.txt`](https://github.com/valid-studio/valid-team-releases/releases/latest/download/SHA256SUMS-windows.txt)
+
+> **SmartScreen 首次运行提示**：首发阶段暂未附加商业代码签名证书。Windows 10/11 首次运行安装包或程序时若弹出 Microsoft Defender SmartScreen 蓝框提示，点击 **「更多信息 (More info)」→「仍要运行 (Run anyway)」** 即可正常安装启动，并可通过 `SHA256SUMS-windows.txt` 校验官方安装包完整性。
+
+### Linux 解压即用
 ```bash
-# x86_64 设备（ARM64 请替换为 ValidTeam-linux-arm64.tar.gz）
 tar -xzf ValidTeam-linux-amd64.tar.gz && cd ValidTeam-linux-amd64
-
-# 默认安全绑定本机 127.0.0.1:8787
 ./vteam
-
-# 如需局域网 / 内网服务器供其他设备访问（请配合防火墙或反向代理使用）
-./vteam --addr 0.0.0.0:8787
 ```
+
+### Free 与 Pro 版本说明
+- **Free 免费版**：开箱即用，支持全工作区 **跨项目共享 3 个 AI Agent 席位**，零后台遥测；
+- **Pro 专业版**：支持全工作区 **跨项目高达 99 个 AI Agent 席位**，在软件内「⚙️ 系统配置 → 版本权益与 Pro Key 激活」粘贴 `VTPRO-...` 即可激活（首次激活联网核验设备名额，日常 100% 离线使用，无需注册账号；升级前的老版本存量项目与角色数据 100% 保留可正常使用）。欢迎在 [GitHub Discussions](https://github.com/valid-studio/valid-team-releases/discussions) 分享使用反馈或团队配置，联系获赠官方 Pro Key。
 
 </details>

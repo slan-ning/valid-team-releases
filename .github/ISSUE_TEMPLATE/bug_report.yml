@@ -1,0 +1,52 @@
+name: Bug Report / 问题反馈
+description: Report a bug or crash in Valid Team (macOS / Windows / Linux) · 反馈桌面端或网页端异常
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈问题！请尽量粘贴软件内「⚙️ 系统配置 → 一键复制诊断信息」生成的纯脱敏环境摘要。
+        **注意：请勿粘贴任何 API Key、Pro 激活码 (`VTPRO-...`) 或隐私文件内容。**
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Environment Diagnostics / 环境诊断信息（必填）
+      description: Click "Copy Sanitized Diagnostics" in System Settings → Diagnostics, and paste below. (No keys or local paths included)
+      placeholder: |
+        Valid Team v1.2.0 (build 20261115.xx)
+        Platform: darwin/arm64 or windows/amd64
+        Edition: Free / Pro
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Operating System / 操作系统
+      options:
+        - macOS (Apple Silicon arm64)
+        - macOS (Intel x86_64)
+        - Windows 11 (x64)
+        - Windows 10 (x64)
+        - Linux (x86_64)
+        - Linux (ARM64)
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened? / 问题描述与复现步骤
+      description: Describe what you did, what you expected, and what actually happened.
+      placeholder: |
+        1. Opened project ...
+        2. Clicked ...
+        3. Observed ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs or Screenshots (Optional) / 脱敏日志或截图（可选）
+      description: Please redact any personal paths or secrets before pasting.
+    validations:
+      required: false

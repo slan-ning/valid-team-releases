@@ -1,4 +1,4 @@
-name: Clean User macOS VM DMG Install & GUI E2E Gate (Free Public Runner)
+name: Clean User VM DMG / Windows / Linux E2E Gate (Free Public Runner)
 
 on:
   release:
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   clean-user-e2e-test:
-    name: "Clean User VM DMG Install & Real-LLM 6-Stage GUI E2E (No Go / No Source)"
+    name: "macOS Clean User VM DMG Install & Real-LLM 6-Stage GUI E2E"
     runs-on: macos-15-intel
     timeout-minutes: 45
     env:
@@ -68,7 +68,7 @@ jobs:
           fi
           echo "✅ Verified: Pure user macOS environment (No Go compiler, No OpenCode CLI, No app source code)."
 
-      - name: 4. Simulate Browser Quarantine, Verify Apple Notarization Ticket & Gatekeeper, and Check v1.1.1 -> Latest Online OTA
+      - name: 4. Simulate Browser Quarantine, Verify Apple Notarization Ticket & Gatekeeper, and Check Online OTA
         run: |
           set -euo pipefail
           DMG_FILE="$HOME/Downloads/validteam-installer/ValidTeam.dmg"
@@ -85,7 +85,6 @@ jobs:
           ditto "$MOUNT_DIR/Valid Team.app" "/Applications/Valid Team.app"
           hdiutil detach "$MOUNT_DIR"
 
-          # Ensure browser quarantine attribute remains attached to /Applications/Valid Team.app (NEVER strip quarantine!)
           xattr -w com.apple.quarantine "$QUARANTINE_VAL" "/Applications/Valid Team.app"
           echo "==> Active com.apple.quarantine attribute on /Applications/Valid Team.app:"
           xattr -p com.apple.quarantine "/Applications/Valid Team.app"
@@ -95,9 +94,9 @@ jobs:
           xcrun stapler validate "/Applications/Valid Team.app"
           spctl -a -t exec -v "/Applications/Valid Team.app"
 
-          echo "==> Verifying live online OTA Release Check (v1.1.7 -> latest) against public repository..."
-          VTEAM_OTA_TEST_CURRENT_VERSION="1.1.7" \
-          VTEAM_OTA_TEST_CURRENT_BUILD="20261114.40" \
+          echo "==> Verifying live online OTA Release Check (v1.1.9 -> latest) against public repository..."
+          VTEAM_OTA_TEST_CURRENT_VERSION="1.1.9" \
+          VTEAM_OTA_TEST_CURRENT_BUILD="20261115.42" \
             "/Applications/Valid Team.app/Contents/MacOS/ValidTeam" --verify-online-release-check
 
       - name: 5. Run 6-Stage Real-LLM GUI E2E in Pure User Environment (OpenCode Go · deepseek-v4.1-flash)
@@ -126,6 +125,83 @@ jobs:
           name: ValidTeam-macOS-GUI-Test-Bundle
           retention-days: 5
           path: test-artifacts/
+
+  windows-native-smoke:
+    name: "Windows x64 Native Smoke (Checksum · Silent Install · --ci-selftest · Portable ZIP)"
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: 1. Download Windows Installer, Portable ZIP & Checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_TAG: ${{ github.event.release.tag_name || inputs.release_tag || 'latest' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dlDir = Join-Path $env:RUNNER_TEMP "vt-win"
+          New-Item -ItemType Directory -Force -Path $dlDir | Out-Null
+          Set-Location $dlDir
+          if ($env:TARGET_TAG -eq "latest" -or [string]::IsNullOrWhiteSpace($env:TARGET_TAG)) {
+            gh release download --repo "$env:GITHUB_REPOSITORY" -p "ValidTeam-Setup.exe" -p "ValidTeam-windows-amd64.zip" -p "SHA256SUMS-windows.txt" --clobber
+          } else {
+            gh release download "$env:TARGET_TAG" --repo "$env:GITHUB_REPOSITORY" -p "ValidTeam-Setup.exe" -p "ValidTeam-windows-amd64.zip" -p "SHA256SUMS-windows.txt" --clobber
+          }
+          Get-Content SHA256SUMS-windows.txt
+          foreach ($line in Get-Content SHA256SUMS-windows.txt) {
+            if ($line -match '^([0-9a-fA-F]{64})\s+(.+)$') {
+              $expected = $Matches[1].ToLowerInvariant()
+              $file = $Matches[2].Trim()
+              if (Test-Path -LiteralPath $file) {
+                $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+                if ($actual -ne $expected) {
+                  throw "SHA256 mismatch for ${file}: expected $expected, got $actual"
+                }
+                Write-Host "[OK] SHA256 verified for $file"
+              }
+            }
+          }
+
+      - name: 2. Silent Install ValidTeam-Setup.exe & Run --ci-selftest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dlDir = Join-Path $env:RUNNER_TEMP "vt-win"
+          $setupExe = Join-Path $dlDir "ValidTeam-Setup.exe"
+          $proc = Start-Process -FilePath $setupExe -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) {
+            throw "Installer failed with exit code $($proc.ExitCode)"
+          }
+          $installDir = Join-Path $env:LOCALAPPDATA "Programs\ValidTeam"
+          $guiExe = Join-Path $installDir "ValidTeam.exe"
+          $vteamExe = Join-Path $installDir "vteam.exe"
+          if (-not (Test-Path -LiteralPath $guiExe)) { throw "Missing $guiExe" }
+          if (-not (Test-Path -LiteralPath $vteamExe)) { throw "Missing $vteamExe" }
+
+          # Stage an old backup marker to confirm startup cleanup
+          Set-Content -LiteralPath (Join-Path $installDir "vteam.exe.old") -Value "stale" -Encoding ASCII
+          $stOut = Join-Path $env:RUNNER_TEMP "selftest-out.txt"
+          $stErr = Join-Path $env:RUNNER_TEMP "selftest-err.txt"
+          $stProc = Start-Process -FilePath $guiExe -ArgumentList "--ci-selftest" -Wait -PassThru -RedirectStandardOutput $stOut -RedirectStandardError $stErr
+          $out = (Get-Content -LiteralPath $stOut -Raw -ErrorAction SilentlyContinue)
+          $err = (Get-Content -LiteralPath $stErr -Raw -ErrorAction SilentlyContinue)
+          Write-Host $out
+          if ($err) { Write-Host $err }
+          if ($stProc.ExitCode -ne 0 -or $out -notmatch "WIN_GUI_SELFTEST_OK") {
+            throw "ValidTeam.exe --ci-selftest failed (exit=$($stProc.ExitCode))"
+          }
+          if (Test-Path -LiteralPath (Join-Path $installDir "vteam.exe.old")) {
+            throw "vteam.exe.old was not cleaned up by ValidTeam.exe"
+          }
+          if (Get-Process -Name "vteam" -ErrorAction SilentlyContinue) {
+            throw "Lingering vteam.exe process detected after ValidTeam.exe exit"
+          }
+
+          # Verify portable archive extracts cleanly and vteam --version works
+          $portDir = Join-Path $env:RUNNER_TEMP "vt-win-portable"
+          Expand-Archive -LiteralPath (Join-Path $dlDir "ValidTeam-windows-amd64.zip") -DestinationPath $portDir -Force
+          $portVteam = Get-ChildItem -Path $portDir -Filter "vteam.exe" -Recurse | Select-Object -First 1
+          if (-not $portVteam) { throw "Portable ZIP missing vteam.exe" }
+          & $portVteam.FullName --version
 
   linux-native-smoke:
     name: "Linux ${{ matrix.arch }} Native Smoke (clean tar extract · --help · 127.0.0.1:8787 -> 200)"
