@@ -1,0 +1,115 @@
+name: Temporary Windows Installer Packaging
+
+on:
+  workflow_dispatch:
+    inputs:
+      staging_tag:
+        required: true
+        type: string
+      build_number:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  package-windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download Staging Input & Extract
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGING_TAG: ${{ inputs.staging_tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          $work = Join-Path $env:RUNNER_TEMP "win-pkg"
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          gh release download $env:STAGING_TAG --repo "${{ github.repository }}" -p "win-pkg-input.zip" -D $work
+          Expand-Archive -Path (Join-Path $work "win-pkg-input.zip") -DestinationPath $work -Force
+
+      - name: Build ValidTeam-Setup.exe with Inno Setup & Verify Silent Install + --ci-selftest
+        shell: pwsh
+        env:
+          BUILD_NUMBER: ${{ inputs.build_number }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          $OutputEncoding = [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+
+          $work = Join-Path $env:RUNNER_TEMP "win-pkg"
+          $stageDir = Join-Path $work "ValidTeam"
+          $outDir = Join-Path $work "out"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+          $iscc = $null
+          foreach ($cand in @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
+            "C:\ProgramData\chocolatey\bin\ISCC.exe"
+          )) {
+            if ($cand -and (Test-Path -LiteralPath $cand)) { $iscc = $cand; break }
+          }
+          if (-not $iscc) {
+            Write-Host "Installing Inno Setup via Chocolatey..."
+            & choco install innosetup -y --no-progress | Out-Null
+            foreach ($cand in @(
+              "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+              "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
+              "C:\ProgramData\chocolatey\bin\ISCC.exe"
+            )) {
+              if ($cand -and (Test-Path -LiteralPath $cand)) { $iscc = $cand; break }
+            }
+          }
+          if (-not $iscc) { throw "ISCC.exe not found" }
+
+          $issFile = Join-Path $work "installer.iss"
+          & $iscc "/DMyAppVersion=1.2.0" "/DMyBuildNumber=$($env:BUILD_NUMBER)" "/DSourceDir=$stageDir" "/DOutputDir=$outDir" $issFile
+          if ($LASTEXITCODE -ne 0) { throw "ISCC.exe failed ($LASTEXITCODE)" }
+
+          $setupPath = Join-Path $outDir "ValidTeam-Setup.exe"
+          $zipPath = Join-Path $work "ValidTeam-windows-amd64.zip"
+          Copy-Item -LiteralPath $zipPath -Destination (Join-Path $outDir "ValidTeam-windows-amd64.zip") -Force
+
+          $setupHash = (Get-FileHash -LiteralPath $setupPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $zipHash = (Get-FileHash -LiteralPath (Join-Path $outDir "ValidTeam-windows-amd64.zip") -Algorithm SHA256).Hash.ToLowerInvariant()
+          $sums = @(
+            "$setupHash  ValidTeam-Setup.exe",
+            "$zipHash  ValidTeam-windows-amd64.zip"
+          ) -join "`n"
+          [System.IO.File]::WriteAllText((Join-Path $outDir "SHA256SUMS-windows.txt"), ($sums + "`n"), [System.Text.UTF8Encoding]::new($false))
+          Get-Content -LiteralPath (Join-Path $outDir "SHA256SUMS-windows.txt")
+
+          # Silent install & --ci-selftest on installed binaries
+          $proc = Start-Process -FilePath $setupPath -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "ValidTeam-Setup.exe failed ($($proc.ExitCode))" }
+
+          $installDir = Join-Path $env:LOCALAPPDATA "Programs\ValidTeam"
+          $guiExe = Join-Path $installDir "ValidTeam.exe"
+          $stale = Join-Path $installDir "vteam.exe.old"
+          Set-Content -LiteralPath $stale -Value "stale" -Encoding ASCII
+
+          $stOut = Join-Path $env:RUNNER_TEMP "inst-st.out.txt"
+          $stErr = Join-Path $env:RUNNER_TEMP "inst-st.err.txt"
+          $env:VALID_TEAM_SECRET_BACKEND = "memory"
+          $sp = Start-Process -FilePath $guiExe -ArgumentList "--ci-selftest" -Wait -PassThru -RedirectStandardOutput $stOut -RedirectStandardError $stErr
+          $sText = Get-Content -LiteralPath $stOut -Raw -ErrorAction SilentlyContinue
+          Write-Host $sText
+          if ($sp.ExitCode -ne 0 -or $sText -notmatch "WIN_GUI_SELFTEST_OK" -or $sText -notmatch "app icons ok: source=enum_rt_group_icon") {
+            throw "Installed ValidTeam.exe --ci-selftest failed ($($sp.ExitCode))"
+          }
+          if (Test-Path -LiteralPath $stale) { throw "Stale .exe.old not cleaned up" }
+          if (Get-Process -Name "vteam" -ErrorAction SilentlyContinue) { throw "Lingering vteam.exe" }
+
+      - name: Upload ValidTeam-Windows-Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ValidTeam-Windows-Installer
+          retention-days: 1
+          path: |
+            ${{ runner.temp }}/win-pkg/out/ValidTeam-Setup.exe
+            ${{ runner.temp }}/win-pkg/out/ValidTeam-windows-amd64.zip
+            ${{ runner.temp }}/win-pkg/out/SHA256SUMS-windows.txt
