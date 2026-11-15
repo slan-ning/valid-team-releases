@@ -126,14 +126,14 @@ function Click-Point {
     }
 }
 
-# Python stdlib CDP element rect locator (zero external deps)
+# Python stdlib CDP element rect locator (zero external deps, reads $env:CDP_SELECTORS)
 $cdpScriptPath = Join-Path $env:RUNNER_TEMP "cdp_rect.py"
 $cdpScript = @'
-import base64, hashlib, json, os, socket, struct, sys, urllib.request
+import base64, json, os, socket, struct, sys, urllib.request
 from urllib.parse import urlparse
 
 port = int(sys.argv[1])
-selectors = json.loads(sys.argv[2])
+selectors = json.loads(os.environ["CDP_SELECTORS"])
 
 targets = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=2).read().decode("utf-8"))
 ws_url = None
@@ -212,7 +212,6 @@ def ws_recv():
         if opcode == 0x8:
             return None
         if opcode == 0x9:
-            # pong
             continue
         return bytes(payload).decode("utf-8", errors="replace")
 
@@ -253,38 +252,6 @@ sock.close()
 '@
 [System.IO.File]::WriteAllText($cdpScriptPath, $cdpScript, [System.Text.UTF8Encoding]::new($false))
 
-function Click-WebElement {
-    param(
-        [IntPtr]$Hwnd,
-        [string[]]$Selectors,
-        [string]$Label,
-        [int]$TimeoutSec = 10
-    )
-    $selsJson = ($Selectors | ConvertTo-Json -Compress)
-    if ($Selectors.Count -eq 1) { $selsJson = "[$selsJson]" }
-    $deadline = (Get-Date).AddSeconds($TimeoutSec)
-    while ((Get-Date) -lt $deadline) {
-        try {
-            $raw = & $pyExe $cdpScriptPath 9222 $selsJson 2>$null
-            if ($LASTEXITCODE -eq 0 -and $raw) {
-                $res = $raw | ConvertFrom-Json
-                if ($res.ok) {
-                    $origin = New-Object Win32GuiHelper+POINT
-                    $origin.X = 0; $origin.Y = 0
-                    [void][Win32GuiHelper]::ClientToScreen($Hwnd, [ref]$origin)
-                    $sx = $origin.X + [int]$res.x
-                    $sy = $origin.Y + [int]$res.y
-                    Write-Host "[CDP] Clicking [$Label] sel='$($res.sel)' text='$($res.text)' client=($($res.x),$($res.y)) screen=($sx,$sy)"
-                    Click-Point -X $sx -Y $sy
-                    return $true
-                }
-            }
-        } catch {}
-        Start-Sleep -Milliseconds 300
-    }
-    throw "Could not locate WebView2 element [$Label] via CDP selectors: $selsJson"
-}
-
 function Find-UIAByNameRegex {
     param(
         [System.Windows.Automation.AutomationElement]$Root,
@@ -308,6 +275,7 @@ function Find-UIAByNameRegex {
                             $ct = $el.Current.ControlType.ProgrammaticName
                             $score = 0
                             if ($PreferInteractive -and ($ct -match "Button|Hyperlink|MenuItem|TabItem|Edit|TreeItem")) { $score += 10 }
+                            if ($ct -match "Hyperlink|Button|MenuItem") { $score += 5 }
                             if ($r.Left -ge 0 -and $r.Top -ge 0) { $score += 5 }
                             $candidates += [PSCustomObject]@{ Element = $el; Name = $name; Type = $ct; Rect = $r; Score = $score }
                         }
@@ -321,6 +289,61 @@ function Find-UIAByNameRegex {
         Start-Sleep -Milliseconds 300
     }
     return $null
+}
+
+function Click-WebElement {
+    param(
+        [IntPtr]$Hwnd,
+        [string[]]$Selectors,
+        [string]$UiaPattern,
+        [string]$Label,
+        [int]$TimeoutSec = 8
+    )
+    $selsJson = ($Selectors | ConvertTo-Json -Compress)
+    if ($Selectors.Count -eq 1) { $selsJson = "[$selsJson]" }
+    $env:CDP_SELECTORS = $selsJson
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    $lastErr = ""
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $raw = & $pyExe $cdpScriptPath 9222 2>&1 | Out-String
+            if ($LASTEXITCODE -eq 0 -and $raw.Trim().StartsWith("{")) {
+                $res = $raw | ConvertFrom-Json
+                if ($res.ok) {
+                    $origin = New-Object Win32GuiHelper+POINT
+                    $origin.X = 0; $origin.Y = 0
+                    [void][Win32GuiHelper]::ClientToScreen($Hwnd, [ref]$origin)
+                    $sx = $origin.X + [int]$res.x
+                    $sy = $origin.Y + [int]$res.y
+                    Write-Host "[CDP] Clicking [$Label] sel='$($res.sel)' text='$($res.text)' client=($($res.x),$($res.y)) screen=($sx,$sy)"
+                    Click-Point -X $sx -Y $sy
+                    return $true
+                }
+                $lastErr = $raw.Trim()
+            } else {
+                $lastErr = $raw.Trim()
+            }
+        } catch {
+            $lastErr = $_.Exception.Message
+        }
+        Start-Sleep -Milliseconds 300
+    }
+    Write-Host "[CDP-FALLBACK] [$Label] CDP miss ($lastErr); trying UIA '$UiaPattern'..."
+    if ($UiaPattern) {
+        $winEl = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
+        $hit = Find-UIAByNameRegex -Root $winEl -Pattern $UiaPattern -TimeoutSec 5 -PreferInteractive
+        if (-not $hit) {
+            $hit = Find-UIAByNameRegex -Root ([System.Windows.Automation.AutomationElement]::RootElement) -Pattern $UiaPattern -TimeoutSec 4 -PreferInteractive
+        }
+        if ($hit) {
+            $cx = [int][Math]::Round($hit.Rect.Left + $hit.Rect.Width / 2.0)
+            $cy = [int][Math]::Round($hit.Rect.Top + $hit.Rect.Height / 2.0)
+            Write-Host "[UIA] Clicking [$Label] name='$($hit.Name)' type=$($hit.Type) at ($cx,$cy)"
+            Click-Point -X $cx -Y $cy
+            return $true
+        }
+    }
+    throw "Could not locate WebView2 element [$Label] via CDP ($selsJson) or UIA ($UiaPattern)"
 }
 
 # 1. Extract staging package to %LOCALAPPDATA%\Programs\ValidTeam
@@ -476,8 +499,8 @@ Write-Host "[REC] ffmpeg started (pid=$($ffProc.Id)) -> $mp4Path"
 
 $guiProc = $null
 try {
-    # 4. Launch ValidTeam.exe with WebView2 CDP port 9222
-    $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
+    # 4. Launch ValidTeam.exe with WebView2 CDP + accessibility
+    $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222 --force-renderer-accessibility"
     $env:VALID_TEAM_SECRET_BACKEND = "memory"
 
     $guiProc = Start-Process -FilePath $guiExe -PassThru
@@ -515,31 +538,31 @@ try {
     Write-Host "[SCENE 1] ValidTeam.exe main window visible ($targetW x $targetH at $posX,$posY)"
 
     # Scene 2: Click 系统配置
-    [void](Click-WebElement -Hwnd $hwnd -Selectors @('#global-system-settings-link', 'a[href*="view=system"]') -Label "系统配置")
+    [void](Click-WebElement -Hwnd $hwnd -Selectors @('#global-system-settings-link', 'nav.mobile-tabs a[href*="view=system"]', 'a[href*="view=system"]') -UiaPattern "系统配置" -Label "系统配置")
     Start-Sleep -Milliseconds 2500
 
     # Scene 3: Click 📦 交付成果 -> preview Markdown -> SQLite DB -> filter -> export CSV
-    [void](Click-WebElement -Hwnd $hwnd -Selectors @('nav.mobile-tabs a[href*="view=assets"]', 'a[href*="view=assets"]') -Label "📦 交付成果")
+    [void](Click-WebElement -Hwnd $hwnd -Selectors @('nav.mobile-tabs a[href*="view=assets"]', 'a[href*="view=assets"]') -UiaPattern "交付成果" -Label "📦 交付成果")
     Start-Sleep -Milliseconds 2500
 
-    [void](Click-WebElement -Hwnd $hwnd -Selectors @('a.asset-leaf-item[href*=".db"]', 'a[href*="db"]') -Label "版本发布台账.db")
+    [void](Click-WebElement -Hwnd $hwnd -Selectors @('a.asset-leaf-item[href*=".db"]', 'a[href*=".db"]') -UiaPattern "版本发布台账\.db" -Label "版本发布台账.db")
     Start-Sleep -Milliseconds 2500
 
-    [void](Click-WebElement -Hwnd $hwnd -Selectors @('input[aria-label="筛选当前预览记录"]') -Label "筛选输入框")
+    [void](Click-WebElement -Hwnd $hwnd -Selectors @('input[aria-label="筛选当前预览记录"]') -UiaPattern "筛选当前预览记录" -Label "筛选输入框")
     Start-Sleep -Milliseconds 300
     [System.Windows.Forms.SendKeys]::SendWait("Windows")
     Start-Sleep -Milliseconds 1600
     [System.Windows.Forms.SendKeys]::SendWait("^a{BACKSPACE}")
     Start-Sleep -Milliseconds 900
 
-    [void](Click-WebElement -Hwnd $hwnd -Selectors @('a[href*="assets/db-csv"]') -Label "⬇️ 导出 CSV")
+    [void](Click-WebElement -Hwnd $hwnd -Selectors @('a[href*="assets/db-csv"]') -UiaPattern "导出 CSV" -Label "⬇️ 导出 CSV")
     Start-Sleep -Milliseconds 2200
 
     # Scene 4: Back to 🏠 进展总览 -> Approve decision card or inspect 团队成员
-    [void](Click-WebElement -Hwnd $hwnd -Selectors @('nav.mobile-tabs a[href*="view=overview"]', 'a[href*="view=overview"]') -Label "🏠 进展总览")
+    [void](Click-WebElement -Hwnd $hwnd -Selectors @('nav.mobile-tabs a[href*="view=overview"]', 'a[href*="view=overview"]') -UiaPattern "进展总览" -Label "🏠 进展总览")
     Start-Sleep -Milliseconds 2000
 
-    [void](Click-WebElement -Hwnd $hwnd -Selectors @('nav.mobile-tabs a[href*="view=role"]', 'a[data-role-id="product"]') -Label "团队成员")
+    [void](Click-WebElement -Hwnd $hwnd -Selectors @('nav.mobile-tabs a[href*="view=role"]', 'a[data-role-id="product"]') -UiaPattern "团队成员|产品经理" -Label "团队成员")
     Start-Sleep -Milliseconds 2200
 
     # Scene 5: Click window Close X -> hide to tray -> right-click tray -> 打开工作台 -> right-click tray -> 完全退出
