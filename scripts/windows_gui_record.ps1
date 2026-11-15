@@ -70,8 +70,15 @@ public static class Win32GuiHelper {
     [DllImport("kernel32.dll")]
     public static extern uint SetThreadExecutionState(uint esFlags);
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    public static extern IntPtr FindWindowW(string lpClassName, string lpWindowName);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "FindWindowW")]
+    private static extern IntPtr NativeFindWindowW(string lpClassName, string lpWindowName);
+
+    public static IntPtr FindWindowSafe(string cls, string title) {
+        return NativeFindWindowW(
+            string.IsNullOrEmpty(cls) ? null : cls,
+            string.IsNullOrEmpty(title) ? null : title
+        );
+    }
 
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
@@ -117,12 +124,10 @@ public static class Win32GuiHelper {
 "@
 Add-Type -TypeDefinition $win32Code -Language CSharp
 
-# Prevent sleep/screensaver
 [void][Win32GuiHelper]::SetThreadExecutionState(
     [Win32GuiHelper]::ES_CONTINUOUS -bor [Win32GuiHelper]::ES_SYSTEM_REQUIRED -bor [Win32GuiHelper]::ES_DISPLAY_REQUIRED
 )
 
-# Check & upgrade display resolution to crisp HD (prefer 1600x900 or 1440x900 or 1920x1080)
 function Set-PreferredResolution {
     $cur = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
     Write-Host "[DISPLAY] Initial PrimaryScreen: $($cur.Width)x$($cur.Height)"
@@ -136,12 +141,16 @@ function Set-PreferredResolution {
         }
         $idx++
     }
+    $uniqueModes = ($modes | Sort-Object W, H -Unique | ForEach-Object { "$($_.W)x$($_.H)" }) -join ", "
+    Write-Host "[DISPLAY] Available 32-bit modes: $uniqueModes"
     $targets = @(
         @{ W = 1600; H = 900 },
         @{ W = 1440; H = 900 },
         @{ W = 1920; H = 1080 },
+        @{ W = 1366; H = 768 },
+        @{ W = 1280; H = 1024 },
         @{ W = 1280; H = 800 },
-        @{ W = 1280; H = 1024 }
+        @{ W = 1280; H = 768 }
     )
     foreach ($t in $targets) {
         $match = $modes | Where-Object { $_.W -eq $t.W -and $_.H -eq $t.H } | Select-Object -First 1
@@ -205,6 +214,7 @@ function Find-UIAByNameRegex {
         [System.Windows.Automation.AutomationElement]$Root,
         [string]$Pattern,
         [int]$TimeoutSec = 8,
+        [int]$MaxLeft = 99999,
         [switch]$PreferInteractive
     )
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
@@ -219,10 +229,11 @@ function Find-UIAByNameRegex {
                     if ([string]::IsNullOrWhiteSpace($name)) { continue }
                     if ($name -match $Pattern) {
                         $r = $el.Current.BoundingRectangle
-                        if ($r.Width -gt 4 -and $r.Height -gt 4 -and -not [double]::IsInfinity($r.Left) -and -not [double]::IsNaN($r.Left)) {
+                        if ($r.Width -gt 4 -and $r.Height -gt 4 -and -not [double]::IsInfinity($r.Left) -and -not [double]::IsNaN($r.Left) -and $r.Left -le $MaxLeft) {
                             $ct = $el.Current.ControlType.ProgrammaticName
                             $score = 0
                             if ($PreferInteractive -and ($ct -match "Button|Hyperlink|MenuItem|TabItem|Edit|TreeItem")) { $score += 10 }
+                            if ($ct -match "Hyperlink|Button|MenuItem") { $score += 5 }
                             if ($r.Left -ge 0 -and $r.Top -ge 0) { $score += 5 }
                             $candidates += [PSCustomObject]@{
                                 Element = $el
@@ -250,9 +261,10 @@ function Click-UIA {
         [string]$Pattern,
         [string]$Label,
         [int]$TimeoutSec = 10,
+        [int]$MaxLeft = 99999,
         [switch]$Right
     )
-    $hit = Find-UIAByNameRegex -Root $Root -Pattern $Pattern -TimeoutSec $TimeoutSec -PreferInteractive
+    $hit = Find-UIAByNameRegex -Root $Root -Pattern $Pattern -TimeoutSec $TimeoutSec -MaxLeft $MaxLeft -PreferInteractive
     if (-not $hit) {
         throw "Could not find UIA element [$Label] matching '$Pattern'"
     }
@@ -297,7 +309,6 @@ $secToml = @(
 
 $env:VALID_TEAM_SECRET_BACKEND = "memory"
 
-# Temporarily start vteam.exe on random port to seed authentic project structure
 $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
 $listener.Start()
 $seedPort = ($listener.LocalEndpoint).Port
@@ -391,7 +402,6 @@ with contextlib.closing(sqlite3.connect(sys.argv[1], timeout=5.0)) as conn:
     }
 }
 
-# Minimize any open windows on desktop before recording
 try {
     $shellCom = New-Object -ComObject Shell.Application
     $shellCom.MinimizeAll()
@@ -427,7 +437,6 @@ try {
     $guiProc = Start-Process -FilePath $guiExe -PassThru
     Write-Host "[APP] Launched ValidTeam.exe (pid=$($guiProc.Id))"
 
-    # Wait for daemon /api/status & main window
     $hwnd = [IntPtr]::Zero
     $apiReady = $false
     for ($i = 0; $i -lt 50; $i++) {
@@ -437,7 +446,10 @@ try {
                 if ($st.platform -eq "windows/amd64") { $apiReady = $true }
             } catch {}
         }
-        $hwnd = [Win32GuiHelper]::FindWindowW("ValidTeamMainWindowClass", $null)
+        $hwnd = [Win32GuiHelper]::FindWindowSafe("ValidTeamMainWindowClass", "Valid Team")
+        if ($hwnd -eq [IntPtr]::Zero) {
+            $hwnd = [Win32GuiHelper]::FindWindowSafe("ValidTeamMainWindowClass", "")
+        }
         if ($apiReady -and $hwnd -ne [IntPtr]::Zero -and [Win32GuiHelper]::IsWindowVisible($hwnd)) {
             break
         }
@@ -445,10 +457,10 @@ try {
     }
     if ($hwnd -eq [IntPtr]::Zero) { throw "ValidTeamMainWindowClass window did not appear" }
 
-    # Fit window cleanly inside PrimaryScreen.WorkingArea (keep taskbar visible)
+    # Fit window cleanly inside PrimaryScreen.WorkingArea so all edges + close X + taskbar remain visible
     $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-    $targetW = [Math]::Min(1360, $wa.Width - 32)
-    $targetH = [Math]::Min(840, $wa.Height - 24)
+    $targetW = [Math]::Min(1360, $wa.Width - 16)
+    $targetH = [Math]::Min(840, $wa.Height - 16)
     $posX = $wa.Left + [int](($wa.Width - $targetW) / 2)
     $posY = $wa.Top + [int](($wa.Height - $targetH) / 2)
     [void][Win32GuiHelper]::MoveWindow($hwnd, $posX, $posY, $targetW, $targetH, $true)
@@ -458,12 +470,12 @@ try {
     $winEl = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
     Write-Host "[SCENE 1] ValidTeam.exe main window visible ($targetW x $targetH at $posX,$posY)"
 
-    # Scene 2: Click 系统配置
-    Click-UIA -Root $winEl -Pattern "系统配置" -Label "系统配置" -TimeoutSec 10
+    # Scene 2: Click 系统配置 (left rail)
+    Click-UIA -Root $winEl -Pattern "系统配置" -Label "系统配置" -TimeoutSec 10 -MaxLeft 180
     Start-Sleep -Milliseconds 2500
 
-    # Scene 3: Click 📦 交付成果 -> markdown report -> SQLite DB -> filter -> export CSV
-    Click-UIA -Root $winEl -Pattern "交付成果" -Label "📦 交付成果" -TimeoutSec 10
+    # Scene 3: Click 📦 交付成果 -> SQLite DB -> filter -> export CSV
+    Click-UIA -Root $winEl -Pattern "交付成果" -Label "📦 交付成果" -TimeoutSec 10 -MaxLeft 360
     Start-Sleep -Milliseconds 2500
 
     Click-UIA -Root $winEl -Pattern "版本发布台账\.db" -Label "版本发布台账.db" -TimeoutSec 10
@@ -487,10 +499,10 @@ try {
     Start-Sleep -Milliseconds 2200
 
     # Scene 4: Back to 🏠 进展总览 & inspect 产品经理 workspace
-    Click-UIA -Root $winEl -Pattern "进展总览" -Label "🏠 进展总览" -TimeoutSec 8
+    Click-UIA -Root $winEl -Pattern "进展总览" -Label "🏠 进展总览" -TimeoutSec 8 -MaxLeft 360
     Start-Sleep -Milliseconds 2000
 
-    Click-UIA -Root $winEl -Pattern "产品经理" -Label "产品经理" -TimeoutSec 8
+    Click-UIA -Root $winEl -Pattern "产品经理" -Label "产品经理" -TimeoutSec 8 -MaxLeft 360
     Start-Sleep -Milliseconds 2000
 
     # Scene 5: Click window Close X -> hide to tray -> right-click tray -> 打开工作台 -> right-click tray -> 完全退出
@@ -501,39 +513,47 @@ try {
     Write-Host "[SCENE 5] Clicking window Close X at ($closeX, $closeY) to minimize to system tray"
     Click-Point -X $closeX -Y $closeY
     Start-Sleep -Milliseconds 1800
+    Write-Host "[SCENE 5] Window visible after Close X = $([Win32GuiHelper]::IsWindowVisible($hwnd))"
 
     function Open-ValidTeamTrayContextMenu {
         $rootEl = [System.Windows.Automation.AutomationElement]::RootElement
         $trayHit = Find-UIAByNameRegex -Root $rootEl -Pattern "Valid Team" -TimeoutSec 2 -PreferInteractive
         if (-not $trayHit) {
-            # Expand tray overflow chevron
-            $trayWnd = [Win32GuiHelper]::FindWindowW("Shell_TrayWnd", $null)
+            $trayWnd = [Win32GuiHelper]::FindWindowSafe("Shell_TrayWnd", "")
             if ($trayWnd -ne [IntPtr]::Zero) {
                 $trayEl = [System.Windows.Automation.AutomationElement]::FromHandle($trayWnd)
-                $chev = Find-UIAByNameRegex -Root $trayEl -Pattern "Hidden Icons|Notification Chevron|隐藏的图标|SystemTrayIcon" -TimeoutSec 4 -PreferInteractive
-                if (-not $chev) {
-                    # Try AutomationId 1502 or SystemTrayIcon
-                    $allTray = $trayEl.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-                    for ($j = 0; $j -lt $allTray.Count; $j++) {
-                        $item = $allTray.Item($j)
-                        try {
-                            $aid = $item.Current.AutomationId
-                            if ($aid -eq "1502" -or $aid -eq "SystemTrayIcon" -or $item.Current.Name -match "overflow|chevron|hidden") {
-                                $rr = $item.Current.BoundingRectangle
-                                if ($rr.Width -gt 4 -and $rr.Height -gt 4) {
-                                    $chev = [PSCustomObject]@{ Element = $item; Name = $item.Current.Name; Rect = $rr }
-                                    break
-                                }
+                $allTray = $trayEl.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+                $chev = $null
+                for ($j = 0; $j -lt $allTray.Count; $j++) {
+                    $item = $allTray.Item($j)
+                    try {
+                        $nm = $item.Current.Name
+                        $aid = $item.Current.AutomationId
+                        if ($aid -eq "1502" -or $aid -eq "SystemTrayIcon" -or ($nm -match "Hidden Icons|Notification Chevron|Show hidden|隐藏的图标|overflow")) {
+                            $rr = $item.Current.BoundingRectangle
+                            if ($rr.Width -gt 4 -and $rr.Height -gt 4) {
+                                $chev = [PSCustomObject]@{ Element = $item; Name = $nm; Aid = $aid; Rect = $rr }
+                                if ($aid -eq "1502" -or $nm -match "Hidden|Chevron|隐藏") { break }
                             }
-                        } catch {}
-                    }
+                        }
+                    } catch {}
                 }
                 if ($chev) {
                     $cx = [int][Math]::Round($chev.Rect.Left + $chev.Rect.Width / 2.0)
                     $cy = [int][Math]::Round($chev.Rect.Top + $chev.Rect.Height / 2.0)
-                    Write-Host "[TRAY] Clicking overflow chevron '$($chev.Name)' at ($cx,$cy)"
+                    Write-Host "[TRAY] Clicking overflow chevron '$($chev.Name)' (aid=$($chev.Aid)) at ($cx,$cy)"
                     Click-Point -X $cx -Y $cy
-                    Start-Sleep -Milliseconds 900
+                    Start-Sleep -Milliseconds 1000
+                } else {
+                    Write-Host "[TRAY] Listing taskbar UIA buttons for diagnostics:"
+                    for ($j = 0; $j -lt $allTray.Count; $j++) {
+                        try {
+                            $it = $allTray.Item($j)
+                            if ($it.Current.ControlType.ProgrammaticName -match "Button") {
+                                Write-Host "   TrayButton: name='$($it.Current.Name)' aid='$($it.Current.AutomationId)'"
+                            }
+                        } catch {}
+                    }
                 }
             }
             $trayHit = Find-UIAByNameRegex -Root $rootEl -Pattern "Valid Team" -TimeoutSec 5 -PreferInteractive
@@ -559,13 +579,13 @@ try {
             Click-Point -X $mx -Y $my
             return
         }
-        $menuHwnd = [Win32GuiHelper]::FindWindowW("#32768", $null)
+        $menuHwnd = [Win32GuiHelper]::FindWindowSafe("#32768", "")
         if ($menuHwnd -ne [IntPtr]::Zero) {
             $mr = New-Object Win32GuiHelper+RECT
             [void][Win32GuiHelper]::GetWindowRect($menuHwnd, [ref]$mr)
             $mx = [int](($mr.Left + $mr.Right) / 2)
             $my = if ($FallbackPos -eq "top") { $mr.Top + 16 } else { $mr.Bottom - 16 }
-            Write-Host "[TRAY-MENU] Clicking #32768 menu ($FallbackPos) at ($mx,$my)"
+            Write-Host "[TRAY-MENU] Clicking #32768 menu ($FallbackPos) at ($mx,$my) rect=$($mr.Left),$($mr.Top)-$($mr.Right),$($mr.Bottom)"
             Click-Point -X $mx -Y $my
             return
         }
@@ -576,6 +596,7 @@ try {
     Start-Sleep -Milliseconds 1200
     Click-TrayMenuChoice -ItemRegex "打开工作台" -FallbackPos "top"
     Start-Sleep -Milliseconds 2000
+    Write-Host "[SCENE 5] Window visible after 打开工作台 = $([Win32GuiHelper]::IsWindowVisible($hwnd))"
 
     Open-ValidTeamTrayContextMenu
     Start-Sleep -Milliseconds 1000
@@ -614,7 +635,6 @@ if (-not (Test-Path -LiteralPath $mp4Path)) {
 Write-Host "[VERIFY] Inspecting MP4 with ffprobe..."
 & ffprobe -v error -show_entries format=duration,size,bit_rate -show_entries stream=codec_name,width,height,nb_frames,r_frame_rate -of default=noprint_wrappers=1 $mp4Path
 
-# Extract 5 keyframes & verify non-blackness + inter-frame motion
 $framesDir = Join-Path $OutDir "keyframes"
 New-Item -ItemType Directory -Force -Path $framesDir | Out-Null
 foreach ($sec in @(2, 8, 15, 22, 29)) {
@@ -623,7 +643,7 @@ foreach ($sec in @(2, 8, 15, 22, 29)) {
 }
 
 $pyVerify = @"
-import glob, math, os, sys
+import glob, os, sys
 from PIL import Image, ImageStat
 
 frames = sorted(glob.glob(os.path.join(sys.argv[1], "frame_*.png")))
@@ -645,7 +665,7 @@ $pyCmd = Get-Command python -ErrorAction SilentlyContinue
 if (-not $pyCmd) { $pyCmd = Get-Command python3 -ErrorAction SilentlyContinue }
 & $pyCmd.Source -c $pyVerify $framesDir
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "[WARN] PIL not installed or frame check returned non-zero; falling back to raw BMP/filesize check"
+    Write-Host "[WARN] PIL not installed or frame check returned non-zero; falling back to filesize check"
     Get-ChildItem -LiteralPath $framesDir | Format-Table Name, Length
 }
 
