@@ -1,0 +1,138 @@
+name: Windows Clean VM Staging Verification (Zero Source)
+
+on:
+  workflow_dispatch:
+    inputs:
+      staging_tag:
+        description: "Staging draft release tag_name containing ValidTeam-windows-amd64.zip"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  windows-clean-vm-verify:
+    name: "Windows x64 Clean VM Binary & Chinese E2E Verification"
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: 1. Checkout Public Verification Harness (Zero App Source)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: 2. Download Windows Staging Package & Verify SHA-256
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_TAG: ${{ inputs.staging_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p staging-win && cd staging-win
+          RELEASE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=30")"
+          RELEASE_ID="$(printf '%s' "$RELEASE_JSON" | python3 -c 'import json,sys; tag=sys.argv[1]; rs=json.load(sys.stdin); print(next((str(r["id"]) for r in rs if r.get("tag_name")==tag), ""))' "$TARGET_TAG")"
+          if [ -z "$RELEASE_ID" ]; then
+            echo "ERROR: release with tag_name=$TARGET_TAG not found"
+            exit 1
+          fi
+          ASSETS_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets")"
+          for NAME in ValidTeam-windows-amd64.zip SHA256SUMS-windows.txt; do
+            ASSET_ID="$(printf '%s' "$ASSETS_JSON" | python3 -c 'import json,sys; n=sys.argv[1]; xs=json.load(sys.stdin); print(next((str(a["id"]) for a in xs if a.get("name")==n), ""))' "$NAME")"
+            if [ -z "$ASSET_ID" ]; then
+              echo "ERROR: asset $NAME not found in release $RELEASE_ID"
+              exit 1
+            fi
+            curl -fsSL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/octet-stream" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}" \
+              -o "$NAME"
+          done
+          sha256sum -c SHA256SUMS-windows.txt
+          ls -lh ValidTeam-windows-amd64.zip SHA256SUMS-windows.txt
+
+      - name: 3. Extract Portable Package, Seed Memory Backend & Verify ValidTeam.exe --ci-selftest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          $OutputEncoding = [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+
+          $extractRoot = Join-Path $env:RUNNER_TEMP "vt-stage-extract"
+          if (Test-Path -LiteralPath $extractRoot) { Remove-Item -LiteralPath $extractRoot -Recurse -Force }
+          Expand-Archive -LiteralPath ".\staging-win\ValidTeam-windows-amd64.zip" -DestinationPath $extractRoot -Force
+
+          $installDir = Join-Path $env:LOCALAPPDATA "Programs\ValidTeam"
+          if (Test-Path -LiteralPath $installDir) { Remove-Item -LiteralPath $installDir -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+          Copy-Item -Path (Join-Path $extractRoot "ValidTeam\*") -Destination $installDir -Recurse -Force
+
+          $guiExe = Join-Path $installDir "ValidTeam.exe"
+          $vteamExe = Join-Path $installDir "vteam.exe"
+          $vaExe = Join-Path $installDir "va.exe"
+          foreach ($f in @($guiExe, $vteamExe, $vaExe)) {
+            if (-not (Test-Path -LiteralPath $f)) { throw "Missing extracted binary: $f" }
+          }
+
+          $vtDataDir = Join-Path $env:LOCALAPPDATA "ValidTeam"
+          New-Item -ItemType Directory -Force -Path $vtDataDir | Out-Null
+          $secToml = @(
+            'default_model = "opencode-go/deepseek-v4.1-flash"'
+            ''
+            '[[api]]'
+            'name = "opencode-go"'
+            'format = "openai"'
+            'base_url = "https://opencode.ai/inference/go/openai/v1"'
+            'key = "sk-ci-unit-test-placeholder"'
+            'models = ["deepseek-v4.1-flash"]'
+          ) -join "`n"
+          $secPath = Join-Path $vtDataDir "security.toml"
+          [System.IO.File]::WriteAllText($secPath, $secToml, [System.Text.UTF8Encoding]::new($false))
+
+          $stale1 = Join-Path $installDir "vteam.exe.old"
+          $stale2 = Join-Path $installDir "ValidTeam.exe.12345.old"
+          Set-Content -LiteralPath $stale1 -Value "stale1" -Encoding ASCII
+          Set-Content -LiteralPath $stale2 -Value "stale2" -Encoding ASCII
+
+          $env:VALID_TEAM_SECRET_BACKEND = "memory"
+          $stOut = Join-Path $env:RUNNER_TEMP "win-gui-selftest.out.txt"
+          $stErr = Join-Path $env:RUNNER_TEMP "win-gui-selftest.err.txt"
+          $stProc = Start-Process -FilePath $guiExe -ArgumentList "--ci-selftest" -Wait -PassThru -RedirectStandardOutput $stOut -RedirectStandardError $stErr
+          $outText = Get-Content -LiteralPath $stOut -Raw -ErrorAction SilentlyContinue
+          $errText = Get-Content -LiteralPath $stErr -Raw -ErrorAction SilentlyContinue
+          Write-Host $outText
+          if ($errText) { Write-Host $errText }
+
+          if ($stProc.ExitCode -ne 0 -or $outText -notmatch "WIN_GUI_SELFTEST_OK") {
+            throw "ValidTeam.exe --ci-selftest failed (exit=$($stProc.ExitCode))"
+          }
+          if ((Test-Path -LiteralPath $stale1) -or (Test-Path -LiteralPath $stale2)) {
+            throw "Stale .exe.old marker files were not cleaned up on startup"
+          }
+          if (Get-Process -Name "vteam" -ErrorAction SilentlyContinue) {
+            throw "Lingering vteam.exe process found after ValidTeam.exe exit"
+          }
+
+          $verOut = & $vteamExe --version 2>&1 | Out-String
+          Write-Host "[vteam --version] $verOut"
+          if ($LASTEXITCODE -ne 0) { throw "vteam.exe --version failed" }
+          $vaOut = & $vaExe models --security $secPath --json 2>&1 | Out-String
+          Write-Host "[va models --json] $vaOut"
+          if ($LASTEXITCODE -ne 0) { throw "va.exe models failed" }
+
+      - name: 4. Run Black-Box Chinese & SQLite File-Lock Verification (windows_deep_verify.ps1)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          $vteamExe = Join-Path $env:LOCALAPPDATA "Programs\ValidTeam\vteam.exe"
+          $verifyOut = pwsh -File scripts/windows_deep_verify.ps1 -VteamExe $vteamExe | Out-String
+          Write-Host $verifyOut
+          if ($LASTEXITCODE -ne 0 -or $verifyOut -notmatch "WIN_DEEP_VERIFY_OK") {
+            throw "windows_deep_verify.ps1 failed (exit=$LASTEXITCODE)"
+          }
