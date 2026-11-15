@@ -7,11 +7,11 @@
 - **Community & Q&A**: [GitHub Discussions](https://github.com/valid-studio/valid-team-releases/discussions)
 - **Bug Reports**: [GitHub Issues](https://github.com/valid-studio/valid-team-releases/issues)
 
-> This repository (`valid-studio/valid-team-releases`) hosts official installers, macOS OTA manifests, checksums, and community discussions.
+> This repository (`valid-studio/valid-team-releases`) hosts official installers, macOS & Windows OTA manifests, checksums, and community discussions.
 
 ---
 
-## macOS Desktop App (Latest: `v1.2.0`)
+## macOS Desktop App (Latest: `v1.2.1`)
 
 Universal Binary (**Apple Silicon `arm64`** + **Intel `x86_64`**), signed with **Apple Developer ID** and **Notarized**.
 
@@ -25,14 +25,17 @@ Universal Binary (**Apple Silicon `arm64`** + **Intel `x86_64`**), signed with *
 
 ---
 
-## Windows 10 / 11 Desktop App (x64 · Latest: `v1.2.0`)
+## Windows 10 / 11 Desktop App (x64 · Latest: `v1.2.1`)
 
 Standalone desktop window built on system **WebView2** + system tray companion, no admin privileges or extra runtime required.
 
 - **Recommended Installer**: [Download ValidTeam-Setup.exe](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-Setup.exe)
 - **Portable Archive**: [Download ValidTeam-windows-amd64.zip](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-windows-amd64.zip)
+- **OTA Manifest (`v1.2.1+`)**: `https://github.com/valid-studio/valid-team-releases/releases/latest/download/latest-windows.json`
 - **SHA-256 Checksums**: [`SHA256SUMS-windows.txt`](https://github.com/valid-studio/valid-team-releases/releases/latest/download/SHA256SUMS-windows.txt)
 
+> **Automatic Updates (`v1.2.1+`)**: Both Setup and Portable editions silently download & SHA-256 verify new releases in the background and restart cleanly in-place after a single confirmation (all local projects and keys in `%LOCALAPPDATA%\ValidTeam` are 100% preserved).
+>
 > **Windows SmartScreen Note**: Initial Windows releases do not yet carry a commercial code-signing certificate. If Microsoft Defender SmartScreen prompts on first launch, click **"More info"** → **"Run anyway"** to install and start. You can verify package integrity anytime against `SHA256SUMS-windows.txt`.
 
 ---
@@ -89,14 +92,15 @@ Get-FileHash ValidTeam-Setup.exe -Algorithm SHA256
 - **使用交流**：[GitHub Discussions](https://github.com/valid-studio/valid-team-releases/discussions)
 - **问题反馈**：[GitHub Issues](https://github.com/valid-studio/valid-team-releases/issues)
 
-### macOS 安装与更新（当前版本 `v1.2.0`）
+### macOS 安装与更新（当前版本 `v1.2.1`）
 1. 下载 [ValidTeam.dmg](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam.dmg)，将 **`Valid Team.app`** 拖入 **`Applications`（应用程序）**；
 2. 安装包已通过 **Apple Developer ID 官方签名与 Notarization 公证**；
-3. 旧版本用户可在菜单栏点击「检查更新…」直接热更新至 `v1.2.0`。
+3. 旧版本用户可在菜单栏点击「检查更新…」直接热更新至 `v1.2.1`。
 
 ### Windows 10 / 11 安装与首次运行指引（x64 独立桌面窗口版）
 - **推荐图形安装包**：[下载 ValidTeam-Setup.exe](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-Setup.exe)（原生 WebView2 独立桌面窗口 + 系统托盘常驻、免管理员一键安装）
 - **免安装便携包**：[下载 ValidTeam-windows-amd64.zip](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-windows-amd64.zip)
+- **OTA 自动热更清单（`v1.2.1+`）**：`https://github.com/valid-studio/valid-team-releases/releases/latest/download/latest-windows.json`（安装版与便携版均支持后台静默下载 SHA-256 校验，用户最多确认一次即可原地自动替换并重启，完整保留 `%LOCALAPPDATA%\ValidTeam` 项目与密钥数据）
 - **SHA-256 校验清单**：[`SHA256SUMS-windows.txt`](https://github.com/valid-studio/valid-team-releases/releases/latest/download/SHA256SUMS-windows.txt)
 
 > **SmartScreen 首次运行提示**：首发阶段暂未附加商业代码签名证书。Windows 10/11 首次运行安装包或程序时若弹出 Microsoft Defender SmartScreen 蓝框提示，点击 **「更多信息 (More info)」→「仍要运行 (Run anyway)」** 即可正常安装启动，并可通过 `SHA256SUMS-windows.txt` 校验官方安装包完整性。

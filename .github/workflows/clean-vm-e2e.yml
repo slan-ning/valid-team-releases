@@ -131,7 +131,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
-      - name: 1. Download Windows Installer, Portable ZIP & Checksums
+      - name: 1. Download Windows Installer, Portable ZIP, OTA Manifest & Checksums
         env:
           GH_TOKEN: ${{ github.token }}
           TARGET_TAG: ${{ github.event.release.tag_name || inputs.release_tag || 'latest' }}
@@ -142,9 +142,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path $dlDir | Out-Null
           Set-Location $dlDir
           if ($env:TARGET_TAG -eq "latest" -or [string]::IsNullOrWhiteSpace($env:TARGET_TAG)) {
-            gh release download --repo "$env:GITHUB_REPOSITORY" -p "ValidTeam-Setup.exe" -p "ValidTeam-windows-amd64.zip" -p "SHA256SUMS-windows.txt" --clobber
+            gh release download --repo "$env:GITHUB_REPOSITORY" -p "ValidTeam-Setup.exe" -p "ValidTeam-windows-amd64.zip" -p "SHA256SUMS-windows.txt" -p "latest-windows.json" --clobber
           } else {
-            gh release download "$env:TARGET_TAG" --repo "$env:GITHUB_REPOSITORY" -p "ValidTeam-Setup.exe" -p "ValidTeam-windows-amd64.zip" -p "SHA256SUMS-windows.txt" --clobber
+            gh release download "$env:TARGET_TAG" --repo "$env:GITHUB_REPOSITORY" -p "ValidTeam-Setup.exe" -p "ValidTeam-windows-amd64.zip" -p "SHA256SUMS-windows.txt" -p "latest-windows.json" --clobber
           }
           Get-Content SHA256SUMS-windows.txt
           foreach ($line in Get-Content SHA256SUMS-windows.txt) {
@@ -160,8 +160,18 @@ jobs:
               }
             }
           }
+          $winManifest = Get-Content -LiteralPath "latest-windows.json" -Raw | ConvertFrom-Json
+          $zipActual = (Get-FileHash -LiteralPath "ValidTeam-windows-amd64.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $setupActual = (Get-FileHash -LiteralPath "ValidTeam-Setup.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($winManifest.zip_sha256.ToLowerInvariant() -ne $zipActual) {
+            throw "latest-windows.json zip_sha256 mismatch"
+          }
+          if ($winManifest.setup_sha256.ToLowerInvariant() -ne $setupActual) {
+            throw "latest-windows.json setup_sha256 mismatch"
+          }
+          Write-Host "[OK] latest-windows.json verified (version=$($winManifest.version), build=$($winManifest.build))"
 
-      - name: 2. Silent Install ValidTeam-Setup.exe & Run --ci-selftest
+      - name: 2. Silent Install ValidTeam-Setup.exe, --ci-selftest & --verify-ota-selftest
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -194,6 +204,22 @@ jobs:
           }
           if (Get-Process -Name "vteam" -ErrorAction SilentlyContinue) {
             throw "Lingering vteam.exe process detected after ValidTeam.exe exit"
+          }
+
+          # Verify Windows OTA manifest download, SHA-256 verification & tamper rejection
+          $manifestFile = (Join-Path $dlDir "latest-windows.json") -replace '\\', '/'
+          $env:VTEAM_WIN_OTA_MANIFEST_URL = "file:///$manifestFile"
+          $env:VTEAM_OTA_TEST_CURRENT_VERSION = "1.2.0"
+          $env:VTEAM_WIN_OTA_CACHE_DIR = Join-Path $env:RUNNER_TEMP "vt-win-ota-selftest"
+          $otaOut = Join-Path $env:RUNNER_TEMP "ota-selftest-out.txt"
+          $otaErr = Join-Path $env:RUNNER_TEMP "ota-selftest-err.txt"
+          $otaProc = Start-Process -FilePath $guiExe -ArgumentList "--verify-ota-selftest" -Wait -PassThru -RedirectStandardOutput $otaOut -RedirectStandardError $otaErr
+          $otaOutTxt = (Get-Content -LiteralPath $otaOut -Raw -ErrorAction SilentlyContinue)
+          $otaErrTxt = (Get-Content -LiteralPath $otaErr -Raw -ErrorAction SilentlyContinue)
+          Write-Host $otaOutTxt
+          if ($otaErrTxt) { Write-Host $otaErrTxt }
+          if ($otaProc.ExitCode -ne 0 -or $otaOutTxt -notmatch "WIN_OTA_SELFTEST_OK") {
+            throw "ValidTeam.exe --verify-ota-selftest failed (exit=$($otaProc.ExitCode))"
           }
 
           # Verify portable archive extracts cleanly and vteam --version works
