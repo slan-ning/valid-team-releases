@@ -1,0 +1,108 @@
+name: Temporary Windows Staging Verify
+
+on:
+  workflow_dispatch:
+    inputs:
+      staging_tag:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  verify-windows:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download & Extract Staging Binaries
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGING_TAG: ${{ inputs.staging_tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          $work = Join-Path $env:RUNNER_TEMP "win-verify"
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          gh release download $env:STAGING_TAG --repo "${{ github.repository }}" -p "ValidTeam-windows-verify.zip" -D $work
+          Expand-Archive -Path (Join-Path $work "ValidTeam-windows-verify.zip") -DestinationPath $work -Force
+
+      - name: Run Windows Unit Tests, --ci-selftest & CLI Smoke Checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          $OutputEncoding = [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+          $env:PYTHONUTF8 = "1"
+          $env:PYTHONIOENCODING = "utf-8"
+          $env:VALID_TEAM_SECRET_BACKEND = "memory"
+
+          $appDir = Join-Path $env:RUNNER_TEMP "win-verify\ValidTeam"
+          $guiExe = Join-Path $appDir "ValidTeam.exe"
+          $vteamExe = Join-Path $appDir "vteam.exe"
+          $vaExe = Join-Path $appDir "va.exe"
+          $testExe = Join-Path $appDir "windows.test.exe"
+
+          # Prepare minimal test security.toml for va.exe / vteam.exe
+          $vtDataDir = Join-Path $env:LOCALAPPDATA "ValidTeam"
+          New-Item -ItemType Directory -Force -Path $vtDataDir | Out-Null
+          $secToml = @(
+            'default_model = "opencode-go/deepseek-v4.1-flash"'
+            ''
+            '[[api]]'
+            'name = "opencode-go"'
+            'format = "openai"'
+            'base_url = "https://opencode.ai/inference/go/openai/v1"'
+            'key = "sk-ci-unit-test-placeholder"'
+            'models = ["deepseek-v4.1-flash"]'
+          ) -join "`n"
+          [System.IO.File]::WriteAllText((Join-Path $vtDataDir "security.toml"), $secToml, [System.Text.UTF8Encoding]::new($false))
+
+          Write-Host "==> 1. Run windows.test.exe -test.v"
+          Push-Location $appDir
+          try {
+            & $testExe -test.v
+            if ($LASTEXITCODE -ne 0) { throw "windows.test.exe failed ($LASTEXITCODE)" }
+          } finally {
+            Pop-Location
+          }
+
+          Write-Host "==> 2. Verify ValidTeam.exe --version & --ci-selftest (including embedded icon verification)"
+          $verOut = Join-Path $env:RUNNER_TEMP "gui-ver.out.txt"
+          $verErr = Join-Path $env:RUNNER_TEMP "gui-ver.err.txt"
+          $vp = Start-Process -FilePath $guiExe -ArgumentList "--version" -Wait -PassThru -RedirectStandardOutput $verOut -RedirectStandardError $verErr
+          $vText = Get-Content -LiteralPath $verOut -Raw -ErrorAction SilentlyContinue
+          Write-Host $vText
+          if ($vp.ExitCode -ne 0 -or $vText -notmatch "Valid Team Desktop v1\.2\.0") {
+            throw "ValidTeam.exe --version failed (exit=$($vp.ExitCode))"
+          }
+
+          $stale = Join-Path $appDir "vteam.exe.old"
+          Set-Content -LiteralPath $stale -Value "stale" -Encoding ASCII
+          $stOut = Join-Path $env:RUNNER_TEMP "gui-st.out.txt"
+          $stErr = Join-Path $env:RUNNER_TEMP "gui-st.err.txt"
+          $sp = Start-Process -FilePath $guiExe -ArgumentList "--ci-selftest" -Wait -PassThru -RedirectStandardOutput $stOut -RedirectStandardError $stErr
+          $sText = Get-Content -LiteralPath $stOut -Raw -ErrorAction SilentlyContinue
+          $sErr = Get-Content -LiteralPath $stErr -Raw -ErrorAction SilentlyContinue
+          Write-Host $sText
+          if ($sErr) { Write-Host $sErr }
+          if ($sp.ExitCode -ne 0 -or $sText -notmatch "WIN_GUI_SELFTEST_OK" -or $sText -notmatch "app icons ok: source=enum_rt_group_icon") {
+            throw "ValidTeam.exe --ci-selftest failed (exit=$($sp.ExitCode))"
+          }
+          if (Test-Path -LiteralPath $stale) {
+            throw "Stale .exe.old was not cleaned up"
+          }
+          if (Get-Process -Name "vteam" -ErrorAction SilentlyContinue) {
+            throw "Lingering vteam.exe process found"
+          }
+
+          Write-Host "==> 3. Verify vteam.exe --version & va.exe models --json"
+          & $vteamExe --version
+          if ($LASTEXITCODE -ne 0) { throw "vteam.exe --version failed" }
+          $vaOut = & $vaExe models --json | Out-String
+          Write-Host $vaOut
+          if ($LASTEXITCODE -ne 0 -or $vaOut -notmatch "deepseek-v4\.1-flash") {
+            throw "va.exe models --json failed"
+          }
+          Write-Host "ALL_WINDOWS_STAGING_CHECKS_OK"
