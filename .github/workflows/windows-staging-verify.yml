@@ -62,7 +62,7 @@ jobs:
           Write-Host "==> 1. Run windows.test.exe -test.v"
           Push-Location $appDir
           try {
-            & $testExe -test.v
+            & $testExe "-test.v"
             if ($LASTEXITCODE -ne 0) { throw "windows.test.exe failed ($LASTEXITCODE)" }
           } finally {
             Pop-Location
