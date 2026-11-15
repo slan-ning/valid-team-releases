@@ -31,44 +31,11 @@ public static class Win32GuiHelper {
         public int Y;
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    public struct DEVMODEW {
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string dmDeviceName;
-        public ushort dmSpecVersion;
-        public ushort dmDriverVersion;
-        public ushort dmSize;
-        public ushort dmDriverExtra;
-        public uint dmFields;
-        public int dmPositionX;
-        public int dmPositionY;
-        public uint dmDisplayOrientation;
-        public uint dmDisplayFixedOutput;
-        public short dmColor;
-        public short dmDuplex;
-        public short dmYResolution;
-        public short dmTTOption;
-        public short dmCollate;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string dmFormName;
-        public ushort dmLogPixels;
-        public uint dmBitsPerPel;
-        public uint dmPelsWidth;
-        public uint dmPelsHeight;
-        public uint dmDisplayFlags;
-        public uint dmDisplayFrequency;
-        public uint dmICMMethod;
-        public uint dmICMIntent;
-        public uint dmMediaType;
-        public uint dmDitherType;
-        public uint dmReserved1;
-        public uint dmReserved2;
-        public uint dmPanningWidth;
-        public uint dmPanningHeight;
-    }
-
     [DllImport("kernel32.dll")]
     public static extern uint SetThreadExecutionState(uint esFlags);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "FindWindowW")]
     private static extern IntPtr NativeFindWindowW(string lpClassName, string lpWindowName);
@@ -82,6 +49,9 @@ public static class Win32GuiHelper {
 
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
 
     [DllImport("user32.dll")]
     public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
@@ -104,12 +74,6 @@ public static class Win32GuiHelper {
     [DllImport("user32.dll")]
     public static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, UIntPtr dwExtraInfo);
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    public static extern bool EnumDisplaySettingsW(string lpszDeviceName, int iModeNum, ref DEVMODEW lpDevMode);
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    public static extern int ChangeDisplaySettingsW(ref DEVMODEW lpDevMode, uint dwFlags);
-
     public const uint ES_CONTINUOUS = 0x80000000;
     public const uint ES_SYSTEM_REQUIRED = 0x00000001;
     public const uint ES_DISPLAY_REQUIRED = 0x00000002;
@@ -117,65 +81,18 @@ public static class Win32GuiHelper {
     public const uint MOUSEEVENTF_LEFTUP = 0x0004;
     public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
     public const uint MOUSEEVENTF_RIGHTUP = 0x0010;
-    public const uint DM_PELSWIDTH = 0x00080000;
-    public const uint DM_PELSHEIGHT = 0x00100000;
-    public const uint DM_BITSPERPEL = 0x00040000;
 }
 "@
 Add-Type -TypeDefinition $win32Code -Language CSharp
 
+try { [void][Win32GuiHelper]::SetProcessDpiAwarenessContext([IntPtr](-4)) } catch {}
 [void][Win32GuiHelper]::SetThreadExecutionState(
     [Win32GuiHelper]::ES_CONTINUOUS -bor [Win32GuiHelper]::ES_SYSTEM_REQUIRED -bor [Win32GuiHelper]::ES_DISPLAY_REQUIRED
 )
 
-function Set-PreferredResolution {
-    $cur = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-    Write-Host "[DISPLAY] Initial PrimaryScreen: $($cur.Width)x$($cur.Height)"
-    $dm = New-Object Win32GuiHelper+DEVMODEW
-    $dm.dmSize = [uint16][System.Runtime.InteropServices.Marshal]::SizeOf($dm)
-    $modes = @()
-    $idx = 0
-    while ([Win32GuiHelper]::EnumDisplaySettingsW($null, $idx, [ref]$dm)) {
-        if ($dm.dmBitsPerPel -eq 32) {
-            $modes += [PSCustomObject]@{ W = [int]$dm.dmPelsWidth; H = [int]$dm.dmPelsHeight; Index = $idx }
-        }
-        $idx++
-    }
-    $uniqueModes = ($modes | Sort-Object W, H -Unique | ForEach-Object { "$($_.W)x$($_.H)" }) -join ", "
-    Write-Host "[DISPLAY] Available 32-bit modes: $uniqueModes"
-    $targets = @(
-        @{ W = 1600; H = 900 },
-        @{ W = 1440; H = 900 },
-        @{ W = 1920; H = 1080 },
-        @{ W = 1366; H = 768 },
-        @{ W = 1280; H = 1024 },
-        @{ W = 1280; H = 800 },
-        @{ W = 1280; H = 768 }
-    )
-    foreach ($t in $targets) {
-        $match = $modes | Where-Object { $_.W -eq $t.W -and $_.H -eq $t.H } | Select-Object -First 1
-        if ($match) {
-            if ($cur.Width -eq $t.W -and $cur.Height -eq $t.H) {
-                Write-Host "[DISPLAY] Already at $($t.W)x$($t.H)"
-                return
-            }
-            $dmSet = New-Object Win32GuiHelper+DEVMODEW
-            $dmSet.dmSize = [uint16][System.Runtime.InteropServices.Marshal]::SizeOf($dmSet)
-            if ([Win32GuiHelper]::EnumDisplaySettingsW($null, $match.Index, [ref]$dmSet)) {
-                $dmSet.dmFields = [Win32GuiHelper]::DM_PELSWIDTH -bor [Win32GuiHelper]::DM_PELSHEIGHT -bor [Win32GuiHelper]::DM_BITSPERPEL
-                $res = [Win32GuiHelper]::ChangeDisplaySettingsW([ref]$dmSet, 0)
-                if ($res -eq 0) {
-                    Start-Sleep -Milliseconds 600
-                    $after = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-                    Write-Host "[DISPLAY] Switched resolution to $($after.Width)x$($after.Height)"
-                    return
-                }
-            }
-        }
-    }
-    Write-Host "[DISPLAY] Keeping current resolution $($cur.Width)x$($cur.Height)"
-}
-Set-PreferredResolution
+$pyCmd = Get-Command python -ErrorAction SilentlyContinue
+if (-not $pyCmd) { $pyCmd = Get-Command python3 -ErrorAction SilentlyContinue }
+$pyExe = $pyCmd.Source
 
 function Move-MouseSmooth {
     param([int]$TargetX, [int]$TargetY, [int]$Steps = 18, [int]$DurationMs = 320)
@@ -197,7 +114,7 @@ function Move-MouseSmooth {
 function Click-Point {
     param([int]$X, [int]$Y, [switch]$Right)
     Move-MouseSmooth -TargetX $X -TargetY $Y
-    Start-Sleep -Milliseconds 160
+    Start-Sleep -Milliseconds 150
     if ($Right) {
         [Win32GuiHelper]::mouse_event([Win32GuiHelper]::MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, [UIntPtr]::Zero)
         Start-Sleep -Milliseconds 60
@@ -209,12 +126,170 @@ function Click-Point {
     }
 }
 
+# Python stdlib CDP element rect locator (zero external deps)
+$cdpScriptPath = Join-Path $env:RUNNER_TEMP "cdp_rect.py"
+$cdpScript = @'
+import base64, hashlib, json, os, socket, struct, sys, urllib.request
+from urllib.parse import urlparse
+
+port = int(sys.argv[1])
+selectors = json.loads(sys.argv[2])
+
+targets = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=2).read().decode("utf-8"))
+ws_url = None
+for t in targets:
+    if t.get("type") == "page" and "127.0.0.1:8787" in (t.get("url") or ""):
+        ws_url = t.get("webSocketDebuggerUrl")
+        break
+if not ws_url:
+    for t in targets:
+        if t.get("type") == "page" and t.get("webSocketDebuggerUrl"):
+            ws_url = t["webSocketDebuggerUrl"]
+            break
+if not ws_url:
+    print(json.dumps({"ok": False, "error": "no page target"}))
+    sys.exit(0)
+
+u = urlparse(ws_url)
+sock = socket.create_connection((u.hostname, u.port), timeout=5)
+key = base64.b64encode(os.urandom(16)).decode("ascii")
+req = (
+    f"GET {u.path} HTTP/1.1\r\n"
+    f"Host: {u.hostname}:{u.port}\r\n"
+    f"Upgrade: websocket\r\n"
+    f"Connection: Upgrade\r\n"
+    f"Sec-WebSocket-Key: {key}\r\n"
+    f"Sec-WebSocket-Version: 13\r\n\r\n"
+)
+sock.sendall(req.encode("ascii"))
+buf = b""
+while b"\r\n\r\n" not in buf:
+    chunk = sock.recv(4096)
+    if not chunk:
+        break
+    buf += chunk
+
+def ws_send(text):
+    data = text.encode("utf-8")
+    mask = os.urandom(4)
+    header = bytearray([0x81])
+    n = len(data)
+    if n < 126:
+        header.append(0x80 | n)
+    elif n < 65536:
+        header.append(0x80 | 126)
+        header.extend(struct.pack("!H", n))
+    else:
+        header.append(0x80 | 127)
+        header.extend(struct.pack("!Q", n))
+    header.extend(mask)
+    masked = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
+    sock.sendall(bytes(header) + masked)
+
+def ws_recv():
+    while True:
+        hdr = sock.recv(2)
+        if len(hdr) < 2:
+            return None
+        opcode = hdr[0] & 0x0F
+        ln = hdr[1] & 0x7F
+        if ln == 126:
+            ln = struct.unpack("!H", sock.recv(2))[0]
+        elif ln == 127:
+            ln = struct.unpack("!Q", sock.recv(8))[0]
+        if hdr[1] & 0x80:
+            mask = sock.recv(4)
+        else:
+            mask = None
+        payload = bytearray()
+        while len(payload) < ln:
+            chunk = sock.recv(ln - len(payload))
+            if not chunk:
+                break
+            payload.extend(chunk)
+        if mask:
+            payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+        if opcode == 0x8:
+            return None
+        if opcode == 0x9:
+            # pong
+            continue
+        return bytes(payload).decode("utf-8", errors="replace")
+
+expr = """(() => {
+  const sels = %s;
+  const dpr = window.devicePixelRatio || 1;
+  for (const s of sels) {
+    const els = Array.from(document.querySelectorAll(s));
+    for (const el of els) {
+      const r = el.getBoundingClientRect();
+      if (r.width > 4 && r.height > 4) {
+        el.scrollIntoView({block: 'center', inline: 'nearest'});
+        const r2 = el.getBoundingClientRect();
+        return {
+          ok: true,
+          sel: s,
+          x: Math.round((r2.left + r2.width / 2) * dpr),
+          y: Math.round((r2.top + r2.height / 2) * dpr),
+          text: (el.innerText || el.getAttribute('aria-label') || '').trim().slice(0, 60)
+        };
+      }
+    }
+  }
+  return {ok: false, url: location.href};
+})()""" % json.dumps(selectors)
+
+ws_send(json.dumps({"id": 1, "method": "Runtime.evaluate", "params": {"expression": expr, "returnByValue": True}}))
+while True:
+    raw = ws_recv()
+    if raw is None:
+        break
+    msg = json.loads(raw)
+    if msg.get("id") == 1:
+        val = (((msg.get("result") or {}).get("result") or {}).get("value")) or {"ok": False}
+        print(json.dumps(val, ensure_ascii=False))
+        break
+sock.close()
+'@
+[System.IO.File]::WriteAllText($cdpScriptPath, $cdpScript, [System.Text.UTF8Encoding]::new($false))
+
+function Click-WebElement {
+    param(
+        [IntPtr]$Hwnd,
+        [string[]]$Selectors,
+        [string]$Label,
+        [int]$TimeoutSec = 10
+    )
+    $selsJson = ($Selectors | ConvertTo-Json -Compress)
+    if ($Selectors.Count -eq 1) { $selsJson = "[$selsJson]" }
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $raw = & $pyExe $cdpScriptPath 9222 $selsJson 2>$null
+            if ($LASTEXITCODE -eq 0 -and $raw) {
+                $res = $raw | ConvertFrom-Json
+                if ($res.ok) {
+                    $origin = New-Object Win32GuiHelper+POINT
+                    $origin.X = 0; $origin.Y = 0
+                    [void][Win32GuiHelper]::ClientToScreen($Hwnd, [ref]$origin)
+                    $sx = $origin.X + [int]$res.x
+                    $sy = $origin.Y + [int]$res.y
+                    Write-Host "[CDP] Clicking [$Label] sel='$($res.sel)' text='$($res.text)' client=($($res.x),$($res.y)) screen=($sx,$sy)"
+                    Click-Point -X $sx -Y $sy
+                    return $true
+                }
+            }
+        } catch {}
+        Start-Sleep -Milliseconds 300
+    }
+    throw "Could not locate WebView2 element [$Label] via CDP selectors: $selsJson"
+}
+
 function Find-UIAByNameRegex {
     param(
         [System.Windows.Automation.AutomationElement]$Root,
         [string]$Pattern,
-        [int]$TimeoutSec = 8,
-        [int]$MaxLeft = 99999,
+        [int]$TimeoutSec = 6,
         [switch]$PreferInteractive
     )
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
@@ -229,19 +304,12 @@ function Find-UIAByNameRegex {
                     if ([string]::IsNullOrWhiteSpace($name)) { continue }
                     if ($name -match $Pattern) {
                         $r = $el.Current.BoundingRectangle
-                        if ($r.Width -gt 4 -and $r.Height -gt 4 -and -not [double]::IsInfinity($r.Left) -and -not [double]::IsNaN($r.Left) -and $r.Left -le $MaxLeft) {
+                        if ($r.Width -gt 4 -and $r.Height -gt 4 -and -not [double]::IsInfinity($r.Left) -and -not [double]::IsNaN($r.Left)) {
                             $ct = $el.Current.ControlType.ProgrammaticName
                             $score = 0
                             if ($PreferInteractive -and ($ct -match "Button|Hyperlink|MenuItem|TabItem|Edit|TreeItem")) { $score += 10 }
-                            if ($ct -match "Hyperlink|Button|MenuItem") { $score += 5 }
                             if ($r.Left -ge 0 -and $r.Top -ge 0) { $score += 5 }
-                            $candidates += [PSCustomObject]@{
-                                Element = $el
-                                Name = $name
-                                Type = $ct
-                                Rect = $r
-                                Score = $score
-                            }
+                            $candidates += [PSCustomObject]@{ Element = $el; Name = $name; Type = $ct; Rect = $r; Score = $score }
                         }
                     }
                 } catch {}
@@ -253,26 +321,6 @@ function Find-UIAByNameRegex {
         Start-Sleep -Milliseconds 300
     }
     return $null
-}
-
-function Click-UIA {
-    param(
-        [System.Windows.Automation.AutomationElement]$Root,
-        [string]$Pattern,
-        [string]$Label,
-        [int]$TimeoutSec = 10,
-        [int]$MaxLeft = 99999,
-        [switch]$Right
-    )
-    $hit = Find-UIAByNameRegex -Root $Root -Pattern $Pattern -TimeoutSec $TimeoutSec -MaxLeft $MaxLeft -PreferInteractive
-    if (-not $hit) {
-        throw "Could not find UIA element [$Label] matching '$Pattern'"
-    }
-    $cx = [int][Math]::Round($hit.Rect.Left + $hit.Rect.Width / 2.0)
-    $cy = [int][Math]::Round($hit.Rect.Top + $hit.Rect.Height / 2.0)
-    Write-Host "[UIA] Clicking [$Label] name='$($hit.Name)' type=$($hit.Type) at ($cx,$cy) rect=$([int]$hit.Rect.Left),$([int]$hit.Rect.Top),$([int]$hit.Rect.Width)x$([int]$hit.Rect.Height)"
-    Click-Point -X $cx -Y $cy -Right:$Right
-    return $hit
 }
 
 # 1. Extract staging package to %LOCALAPPDATA%\Programs\ValidTeam
@@ -390,9 +438,7 @@ with contextlib.closing(sqlite3.connect(sys.argv[1], timeout=5.0)) as conn:
     conn.executemany('INSERT INTO "版本发布台账" VALUES (?, ?, ?, ?, ?)', rows)
     conn.commit()
 "@
-    $pyCmd = Get-Command python -ErrorAction SilentlyContinue
-    if (-not $pyCmd) { $pyCmd = Get-Command python3 -ErrorAction SilentlyContinue }
-    & $pyCmd.Source -c $pyCode $dbPath
+    & $pyExe -c $pyCode $dbPath
     if ($LASTEXITCODE -ne 0) { throw "Failed to seed SQLite demo DB" }
     Write-Host "[SEED] Demo project '$projName' seeded cleanly."
 } finally {
@@ -430,8 +476,8 @@ Write-Host "[REC] ffmpeg started (pid=$($ffProc.Id)) -> $mp4Path"
 
 $guiProc = $null
 try {
-    # 4. Launch ValidTeam.exe with WebView2 accessibility enabled
-    $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--force-renderer-accessibility"
+    # 4. Launch ValidTeam.exe with WebView2 CDP port 9222
+    $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
     $env:VALID_TEAM_SECRET_BACKEND = "memory"
 
     $guiProc = Start-Process -FilePath $guiExe -PassThru
@@ -457,7 +503,6 @@ try {
     }
     if ($hwnd -eq [IntPtr]::Zero) { throw "ValidTeamMainWindowClass window did not appear" }
 
-    # Fit window cleanly inside PrimaryScreen.WorkingArea so all edges + close X + taskbar remain visible
     $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
     $targetW = [Math]::Min(1360, $wa.Width - 16)
     $targetH = [Math]::Min(840, $wa.Height - 16)
@@ -467,43 +512,35 @@ try {
     [void][Win32GuiHelper]::SetForegroundWindow($hwnd)
 
     Start-Sleep -Milliseconds 3000
-    $winEl = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
     Write-Host "[SCENE 1] ValidTeam.exe main window visible ($targetW x $targetH at $posX,$posY)"
 
-    # Scene 2: Click 系统配置 (left rail)
-    Click-UIA -Root $winEl -Pattern "系统配置" -Label "系统配置" -TimeoutSec 10 -MaxLeft 180
+    # Scene 2: Click 系统配置
+    [void](Click-WebElement -Hwnd $hwnd -Selectors @('#global-system-settings-link', 'a[href*="view=system"]') -Label "系统配置")
     Start-Sleep -Milliseconds 2500
 
-    # Scene 3: Click 📦 交付成果 -> SQLite DB -> filter -> export CSV
-    Click-UIA -Root $winEl -Pattern "交付成果" -Label "📦 交付成果" -TimeoutSec 10 -MaxLeft 360
+    # Scene 3: Click 📦 交付成果 -> preview Markdown -> SQLite DB -> filter -> export CSV
+    [void](Click-WebElement -Hwnd $hwnd -Selectors @('nav.mobile-tabs a[href*="view=assets"]', 'a[href*="view=assets"]') -Label "📦 交付成果")
     Start-Sleep -Milliseconds 2500
 
-    Click-UIA -Root $winEl -Pattern "版本发布台账\.db" -Label "版本发布台账.db" -TimeoutSec 10
+    [void](Click-WebElement -Hwnd $hwnd -Selectors @('a.asset-leaf-item[href*=".db"]', 'a[href*="db"]') -Label "版本发布台账.db")
     Start-Sleep -Milliseconds 2500
 
-    $filterEl = Find-UIAByNameRegex -Root $winEl -Pattern "筛选当前预览记录" -TimeoutSec 8
-    if ($filterEl) {
-        $fx = [int][Math]::Round($filterEl.Rect.Left + $filterEl.Rect.Width / 2.0)
-        $fy = [int][Math]::Round($filterEl.Rect.Top + $filterEl.Rect.Height / 2.0)
-        Click-Point -X $fx -Y $fy
-        Start-Sleep -Milliseconds 300
-        [System.Windows.Forms.SendKeys]::SendWait("Windows")
-        Start-Sleep -Milliseconds 1600
-        [System.Windows.Forms.SendKeys]::SendWait("^a{BACKSPACE}")
-        Start-Sleep -Milliseconds 900
-    } else {
-        Write-Host "[WARN] Filter input not matched by UIA, skipping filter keystrokes"
-    }
+    [void](Click-WebElement -Hwnd $hwnd -Selectors @('input[aria-label="筛选当前预览记录"]') -Label "筛选输入框")
+    Start-Sleep -Milliseconds 300
+    [System.Windows.Forms.SendKeys]::SendWait("Windows")
+    Start-Sleep -Milliseconds 1600
+    [System.Windows.Forms.SendKeys]::SendWait("^a{BACKSPACE}")
+    Start-Sleep -Milliseconds 900
 
-    Click-UIA -Root $winEl -Pattern "导出 CSV" -Label "⬇️ 导出 CSV" -TimeoutSec 8
+    [void](Click-WebElement -Hwnd $hwnd -Selectors @('a[href*="assets/db-csv"]') -Label "⬇️ 导出 CSV")
     Start-Sleep -Milliseconds 2200
 
-    # Scene 4: Back to 🏠 进展总览 & inspect 产品经理 workspace
-    Click-UIA -Root $winEl -Pattern "进展总览" -Label "🏠 进展总览" -TimeoutSec 8 -MaxLeft 360
+    # Scene 4: Back to 🏠 进展总览 -> Approve decision card or inspect 团队成员
+    [void](Click-WebElement -Hwnd $hwnd -Selectors @('nav.mobile-tabs a[href*="view=overview"]', 'a[href*="view=overview"]') -Label "🏠 进展总览")
     Start-Sleep -Milliseconds 2000
 
-    Click-UIA -Root $winEl -Pattern "产品经理" -Label "产品经理" -TimeoutSec 8 -MaxLeft 360
-    Start-Sleep -Milliseconds 2000
+    [void](Click-WebElement -Hwnd $hwnd -Selectors @('nav.mobile-tabs a[href*="view=role"]', 'a[data-role-id="product"]') -Label "团队成员")
+    Start-Sleep -Milliseconds 2200
 
     # Scene 5: Click window Close X -> hide to tray -> right-click tray -> 打开工作台 -> right-click tray -> 完全退出
     $wr = New-Object Win32GuiHelper+RECT
@@ -544,16 +581,6 @@ try {
                     Write-Host "[TRAY] Clicking overflow chevron '$($chev.Name)' (aid=$($chev.Aid)) at ($cx,$cy)"
                     Click-Point -X $cx -Y $cy
                     Start-Sleep -Milliseconds 1000
-                } else {
-                    Write-Host "[TRAY] Listing taskbar UIA buttons for diagnostics:"
-                    for ($j = 0; $j -lt $allTray.Count; $j++) {
-                        try {
-                            $it = $allTray.Item($j)
-                            if ($it.Current.ControlType.ProgrammaticName -match "Button") {
-                                Write-Host "   TrayButton: name='$($it.Current.Name)' aid='$($it.Current.AutomationId)'"
-                            }
-                        } catch {}
-                    }
                 }
             }
             $trayHit = Find-UIAByNameRegex -Root $rootEl -Pattern "Valid Team" -TimeoutSec 5 -PreferInteractive
@@ -661,9 +688,7 @@ for f in frames:
         raise SystemExit(f"Frame {f} looks solid/blank (stddev={std:.2f}, mean={mean:.2f})")
 print("KEYFRAMES_OK:", means)
 "@
-$pyCmd = Get-Command python -ErrorAction SilentlyContinue
-if (-not $pyCmd) { $pyCmd = Get-Command python3 -ErrorAction SilentlyContinue }
-& $pyCmd.Source -c $pyVerify $framesDir
+& $pyExe -c $pyVerify $framesDir
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[WARN] PIL not installed or frame check returned non-zero; falling back to filesize check"
     Get-ChildItem -LiteralPath $framesDir | Format-Table Name, Length
