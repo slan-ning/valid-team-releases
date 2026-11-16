@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   pack:
@@ -148,9 +148,6 @@ jobs:
           } finally {
             if ($httpProc -and -not $httpProc.HasExited) { Stop-Process -Id $httpProc.Id -Force -ErrorAction SilentlyContinue }
           }
-
-          # Also verify v1.2.6 ValidTeam.exe --verify-ota-selftest against bad manifest
-          $env:VTEAM_WIN_OTA_MANIFEST_URL = "http://127.0.0.1:$port/bad-latest-windows.json"
 
       - uses: actions/upload-artifact@v7
         with:
