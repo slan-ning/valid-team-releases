@@ -121,7 +121,6 @@ jobs:
           $psi.WorkingDirectory = $srvDir
           $psi.UseShellExecute = $false
           $psi.CreateNoWindow = $true
-          $http = [System.Diagnostics.ProcessStartInfo]::new
           $http = [System.Diagnostics.Process]::Start($psi)
           try {
             Start-Sleep -Seconds 2
