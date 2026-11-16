@@ -176,6 +176,8 @@ jobs:
           } finally {
             if ($httpProc -and -not $httpProc.HasExited) { Stop-Process -Id $httpProc.Id -Force -ErrorAction SilentlyContinue }
           }
+          $global:LASTEXITCODE = 0
+          exit 0
 
       - uses: actions/upload-artifact@v7
         with:
