@@ -129,11 +129,31 @@ jobs:
           $badMan.zip_sha256 = ("0" * 64); $badMan.setup_sha256 = ("0" * 64); $badMan.sha256 = ("0" * 64)
           [System.IO.File]::WriteAllText((Join-Path $srvDir "bad-latest-windows.json"), (($badMan | ConvertTo-Json -Depth 4) + "`n"), [System.Text.UTF8Encoding]::new($false))
 
-          $pyCmd = (Get-Command python -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-          if (-not $pyCmd) { $pyCmd = (Get-Command python3 -ErrorAction SilentlyContinue | Select-Object -First 1).Source }
-          $httpProc = Start-Process -FilePath $pyCmd -ArgumentList @("-m", "http.server", "$port", "--bind", "127.0.0.1") -WorkingDirectory $srvDir -PassThru -WindowStyle Hidden
+          $pyExe = $null
+          foreach ($cand in @("python", "py", "python3")) {
+            $cmd = Get-Command $cand -ErrorAction SilentlyContinue
+            if ($cmd -and ($cmd.Source -notlike "*WindowsApps*")) { $pyExe = $cmd.Source; break }
+          }
+          if (-not $pyExe) { throw "No usable Python interpreter found" }
+          $pyArgs = if ([System.IO.Path]::GetFileNameWithoutExtension($pyExe) -eq "py") {
+            "-3 -m http.server $port --bind 127.0.0.1"
+          } else {
+            "-m http.server $port --bind 127.0.0.1"
+          }
+          $psi = [System.Diagnostics.ProcessStartInfo]::new()
+          $psi.FileName = $pyExe; $psi.Arguments = $pyArgs; $psi.WorkingDirectory = $srvDir
+          $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+          $httpProc = [System.Diagnostics.Process]::Start($psi)
           try {
-            Start-Sleep -Seconds 1
+            $srvReady = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              try {
+                $r = Invoke-WebRequest -Uri "http://127.0.0.1:$port/latest-windows.json" -TimeoutSec 2 -UseBasicParsing
+                if ($r.StatusCode -eq 200) { $srvReady = $true; break }
+              } catch { Start-Sleep -Milliseconds 200 }
+            }
+            if (-not $srvReady) { throw "Local OTA server failed to become ready" }
+
             $env:VTEAM_WIN_OTA_CACHE_DIR = (Join-Path $env:RUNNER_TEMP "winotacache")
             $env:VTEAM_WIN_OTA_MANIFEST_URL = "http://127.0.0.1:$port/latest-windows.json"
             $otaOut = & $oldGui --verify-ota-selftest | Out-String
@@ -144,7 +164,13 @@ jobs:
             & $oldGui --verify-ota-selftest | Out-Null
             if ($LASTEXITCODE -eq 0) { throw "Tampered SHA-256 should have failed" }
             Write-Host "[ota-selftest] tampered SHA-256 rejection verified"
-            Write-Host "WIN_OTA_SELFTEST_OK"
+
+            # Also verify new v1.2.6 ValidTeam.exe --verify-ota-selftest against manifest
+            $env:VTEAM_WIN_OTA_CACHE_DIR = (Join-Path $env:RUNNER_TEMP "winotacache-new")
+            $env:VTEAM_WIN_OTA_MANIFEST_URL = "http://127.0.0.1:$port/latest-windows.json"
+            $newOtaOut = & $guiExe --verify-ota-selftest | Out-String
+            Write-Host "New v1.2.6 OTA selftest: $newOtaOut"
+            if ($LASTEXITCODE -ne 0 -or $newOtaOut -notmatch "WIN_OTA_SELFTEST_OK") { throw "New v1.2.6 OTA selftest failed" }
           } finally {
             if ($httpProc -and -not $httpProc.HasExited) { Stop-Process -Id $httpProc.Id -Force -ErrorAction SilentlyContinue }
           }
