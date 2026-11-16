@@ -168,8 +168,10 @@ jobs:
             # Verify v1.2.6 ValidTeam.exe correctly detects same-version (no self-loop upgrade)
             $env:VTEAM_WIN_OTA_CACHE_DIR = (Join-Path $env:RUNNER_TEMP "winotacache-new")
             $env:VTEAM_WIN_OTA_MANIFEST_URL = "http://127.0.0.1:$port/latest-windows.json"
-            $sameOut = (& $guiExe --verify-ota-selftest 2>&1 | Out-String)
-            if ($LASTEXITCODE -eq 0 -or $sameOut -notmatch "is not newer than current") { throw "Expected same-version guard on v1.2.6, got: $sameOut" }
+            $errTmp = Join-Path $env:RUNNER_TEMP "samever-err.txt"
+            $pSame = Start-Process -FilePath $guiExe -ArgumentList @("--verify-ota-selftest") -Wait -PassThru -NoNewWindow -RedirectStandardError $errTmp
+            $sameErr = Get-Content -LiteralPath $errTmp -Raw
+            if ($pSame.ExitCode -eq 0 -or $sameErr -notmatch "is not newer than current") { throw "Expected same-version guard on v1.2.6, got: $sameErr" }
             Write-Host "[ota-selftest] v1.2.6 same-version guard verified" 
           } finally {
             if ($httpProc -and -not $httpProc.HasExited) { Stop-Process -Id $httpProc.Id -Force -ErrorAction SilentlyContinue }
