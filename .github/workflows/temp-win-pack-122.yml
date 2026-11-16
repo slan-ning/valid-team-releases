@@ -127,9 +127,16 @@ jobs:
           $http = [System.Diagnostics.Process]::Start($psi)
           try {
             Start-Sleep -Seconds 2
+            $oldZip = Join-Path $env:RUNNER_TEMP "v121.zip"
+            $oldDir = Join-Path $env:RUNNER_TEMP "v121_unpacked"
+            & curl.exe -fSL "https://github.com/valid-studio/valid-team-releases/releases/download/v1.2.1/ValidTeam-windows-amd64.zip" -o $oldZip
+            if ($LASTEXITCODE -ne 0) { throw "download v1.2.1 failed" }
+            Expand-Archive -LiteralPath $oldZip -DestinationPath $oldDir -Force
+            $oldGuiExe = (Get-ChildItem -Path $oldDir -Filter "ValidTeam.exe" -Recurse | Select-Object -First 1).FullName
+            if (-not $oldGuiExe) { throw "v1.2.1 ValidTeam.exe missing" }
             $env:VTEAM_WIN_OTA_MANIFEST_URL = "http://127.0.0.1:$port/latest-windows.json"
             $env:VTEAM_WIN_OTA_CACHE_DIR = (Join-Path $env:RUNNER_TEMP "winotacache")
-            $otaOut = & $guiExe --verify-ota-selftest | Out-String
+            $otaOut = & $oldGuiExe --verify-ota-selftest | Out-String
             Write-Host "OTA selftest: $otaOut"
             if ($LASTEXITCODE -ne 0 -or $otaOut -notmatch "WIN_OTA_SELFTEST_OK") { throw "ota-selftest failed" }
           } finally {
