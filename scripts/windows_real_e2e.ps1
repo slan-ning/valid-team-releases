@@ -16,7 +16,7 @@ foreach ($testBin in @("core-platform.test.exe", "vteam-statedb.test.exe")) {
     New-Item -ItemType Directory -Force -Path $tWork | Out-Null
     Push-Location $tWork
     try {
-      & $binPath -test.short
+      & $binPath "-test.short"
       if ($LASTEXITCODE -ne 0) {
         throw "Native Windows unit test binary $testBin failed with exit code $LASTEXITCODE"
       }
@@ -59,16 +59,46 @@ $secToml = @(
   ''
 ) -join "`n"
 [System.IO.File]::WriteAllBytes($secFile, [System.Text.Encoding]::ASCII.GetBytes($secToml))
+function Read-RedactedLog([string]$Path) {
+  if (-not (Test-Path -LiteralPath $Path)) { return "<empty>" }
+  try {
+    $fs = [System.IO.FileStream]::new($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    $sr = $null
+    try {
+      $sr = [System.IO.StreamReader]::new($fs, [System.Text.Encoding]::UTF8, $true)
+      $txt = $sr.ReadToEnd()
+    } finally {
+      if ($sr) { $sr.Dispose() }
+      $fs.Dispose()
+    }
+    if ([string]::IsNullOrWhiteSpace($txt)) { return "<empty>" }
+    if (-not [string]::IsNullOrWhiteSpace($env:VTEAM_TEST_API_KEY)) {
+      $txt = $txt.Replace($env:VTEAM_TEST_API_KEY, "[REDACTED]")
+    }
+    return $txt.Trim()
+  } catch {
+    return "<unreadable: $($_.Exception.Message)>"
+  }
+}
+
 $outLog = Join-Path $env:RUNNER_TEMP "win-e2e-vteam-out.log"
 $errLog = Join-Path $env:RUNNER_TEMP "win-e2e-vteam-err.log"
+Remove-Item -LiteralPath $outLog, $errLog -Force -ErrorAction SilentlyContinue
 
 Write-Host "==> [Win-E2E 2/4] Starting vteam.exe on $baseURL with devil workspace path: $e2eRoot"
-$daemon = Start-Process -FilePath $vteamExe -ArgumentList "-addr",$addr,"-root",$e2eRoot,"-security",$secFile -WorkingDirectory $InstallDir -PassThru -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog
+$daemon = Start-Process -FilePath $vteamExe -ArgumentList @(
+  "-addr", $addr,
+  "-root", "`"$e2eRoot`"",
+  "-security", "`"$secFile`""
+) -WorkingDirectory $InstallDir -PassThru -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog
 
 try {
   $ready = $false
   $status = $null
   for ($i = 0; $i -lt 80; $i++) {
+    if ($daemon.HasExited) {
+      break
+    }
     try {
       $resp = Invoke-RestMethod -Uri "$baseURL/api/status" -Method Get -TimeoutSec 2
       if (-not $resp.bootstrapping) {
@@ -80,7 +110,10 @@ try {
     Start-Sleep -Milliseconds 250
   }
   if (-not $ready) {
-    throw "vteam.exe did not finish bootstrap within 20s"
+    $exitInfo = if ($daemon.HasExited) { "exited early with code $($daemon.ExitCode)" } else { "did not finish bootstrap within 20s" }
+    $safeOut = Read-RedactedLog $outLog
+    $safeErr = Read-RedactedLog $errLog
+    throw "vteam.exe $exitInfo (stdout: $safeOut | stderr: $safeErr)"
   }
   if (-not $status.canary_ok -or $status.daemon_health -ne "healthy") {
     throw "Startup SQLite canary failed on Windows: canary_ok=$($status.canary_ok) health=$($status.daemon_health) err=$($status.canary_error)"
@@ -91,7 +124,8 @@ try {
   $projName = "win-team-中文"
   $encProj = [uri]::EscapeDataString($projName)
   $projHdrFile = Join-Path $env:RUNNER_TEMP "win-e2e-proj-hdr.txt"
-  curl.exe -fsS -D $projHdrFile -o NUL -X POST "$baseURL/projects" -d "name=$encProj"
+  $projRespFile = Join-Path $env:RUNNER_TEMP "win-e2e-proj-resp.html"
+  curl.exe -fsS -D "$projHdrFile" -o "$projRespFile" -X POST "$baseURL/projects" -d "name=$encProj"
   if ($LASTEXITCODE -ne 0) {
     throw "POST /projects failed via curl.exe (exit=$LASTEXITCODE)"
   }
@@ -115,12 +149,12 @@ try {
   Set-Content -LiteralPath (Join-Path $delivDir "summary.md") -Value "# Windows E2E Deliverable" -Encoding UTF8
 
   $zipFile = Join-Path $env:RUNNER_TEMP "win-team-backup.zip"
-  curl.exe -fsS -o $zipFile "$baseURL/projects/$encProj/export-backup"
+  curl.exe -fsS -o "$zipFile" "$baseURL/projects/$encProj/export-backup"
   if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $zipFile) -or (Get-Item -LiteralPath $zipFile).Length -lt 100) {
     throw "Exported .zip backup is empty or missing"
   }
   $salvageZip = Join-Path $env:RUNNER_TEMP "win-team-salvage.zip"
-  curl.exe -fsS -o $salvageZip "$baseURL/projects/$encProj/export-backup?salvage=1"
+  curl.exe -fsS -o "$salvageZip" "$baseURL/projects/$encProj/export-backup?salvage=1"
   if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $salvageZip) -or (Get-Item -LiteralPath $salvageZip).Length -lt 100) {
     throw "Salvage .zip backup (?salvage=1) is empty or missing"
   }
@@ -138,7 +172,7 @@ try {
     $setupOK = $false
     for ($setupTry = 1; $setupTry -le 4; $setupTry++) {
       Remove-Item -LiteralPath $setupHdr, $setupResp -Force -ErrorAction SilentlyContinue
-      curl.exe -sS -D $setupHdr -o $setupResp -X POST "$baseURL/setup" `
+      curl.exe -sS -D "$setupHdr" -o "$setupResp" -X POST "$baseURL/setup" `
         --data-urlencode "name=$apiName" `
         --data-urlencode "format=$apiFmt" `
         --data-urlencode "base_url=$apiBase" `
@@ -147,7 +181,7 @@ try {
       $curlExit = $LASTEXITCODE
       $hdrTxt = if (Test-Path -LiteralPath $setupHdr) { Get-Content -LiteralPath $setupHdr -Raw } else { "" }
       if ($curlExit -eq 0 -and $hdrTxt -match "(?m)^HTTP/\S+[ \t]+303\b" -and $hdrTxt -match "(?mi)^Location:[ \t]*/\r?$") {
-        & $vaExe config --security $secFile check | Out-Null
+        & $vaExe "config" "--security" "$secFile" "check" | Out-Null
         if ($LASTEXITCODE -eq 0) {
           $setupOK = $true
           Write-Host "   [PASS] POST /setup + va.exe config check succeeded on Windows ($apiName/$apiModel, attempt $setupTry)"
@@ -170,7 +204,16 @@ try {
     & "$env:SystemRoot\System32\taskkill.exe" /T /F /PID $daemon.Id | Out-Null
     $daemon.WaitForExit(5000) | Out-Null
   }
-  Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP "win-team-backup.zip"), (Join-Path $env:RUNNER_TEMP "win-team-salvage.zip"), (Join-Path $env:RUNNER_TEMP "win-e2e-proj-hdr.txt"), (Join-Path $env:RUNNER_TEMP "win-e2e-setup-hdr.txt"), (Join-Path $env:RUNNER_TEMP "win-e2e-setup-resp.html") -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath @(
+    (Join-Path $env:RUNNER_TEMP "win-team-backup.zip"),
+    (Join-Path $env:RUNNER_TEMP "win-team-salvage.zip"),
+    (Join-Path $env:RUNNER_TEMP "win-e2e-proj-hdr.txt"),
+    (Join-Path $env:RUNNER_TEMP "win-e2e-proj-resp.html"),
+    (Join-Path $env:RUNNER_TEMP "win-e2e-setup-hdr.txt"),
+    (Join-Path $env:RUNNER_TEMP "win-e2e-setup-resp.html"),
+    $outLog,
+    $errLog
+  ) -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host "==> [Win-E2E 4/4] Verifying zero lingering Windows file locks on workspace teardown..."
