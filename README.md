@@ -11,7 +11,7 @@
 
 ---
 
-## macOS Desktop App (Latest: `v1.2.11`)
+## macOS Desktop App (Latest: `v1.2.12`)
 
 Universal Binary (**Apple Silicon `arm64`** + **Intel `x86_64`**), signed with **Apple Developer ID** and **Notarized**.
 
@@ -25,7 +25,7 @@ Universal Binary (**Apple Silicon `arm64`** + **Intel `x86_64`**), signed with *
 
 ---
 
-## Windows 10 / 11 Desktop App (x64 · Latest: `v1.2.11`)
+## Windows 10 / 11 Desktop App (x64 · Latest: `v1.2.12`)
 
 Standalone desktop window built on system **WebView2** + system tray companion, no admin privileges or extra runtime required.
 
@@ -92,10 +92,10 @@ Get-FileHash ValidTeam-Setup.exe -Algorithm SHA256
 - **使用交流**：[GitHub Discussions](https://github.com/valid-studio/valid-team-releases/discussions)
 - **问题反馈**：[GitHub Issues](https://github.com/valid-studio/valid-team-releases/issues)
 
-### macOS 安装与更新（当前版本 `v1.2.11`）
+### macOS 安装与更新（当前版本 `v1.2.12`）
 1. 下载 [ValidTeam.dmg](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam.dmg)，将 **`Valid Team.app`** 拖入 **`Applications`（应用程序）**；
 2. 安装包已通过 **Apple Developer ID 官方签名与 Notarization 公证**；
-3. 旧版本用户可在菜单栏点击「检查更新…」直接热更新至 `v1.2.11`。
+3. 旧版本用户可在菜单栏点击「检查更新…」直接热更新至 `v1.2.12`。
 
 ### Windows 10 / 11 安装与首次运行指引（x64 独立桌面窗口版）
 - **推荐图形安装包**：[下载 ValidTeam-Setup.exe](https://github.com/valid-studio/valid-team-releases/releases/latest/download/ValidTeam-Setup.exe)（原生 WebView2 独立桌面窗口 + 系统托盘常驻、免管理员一键安装）
