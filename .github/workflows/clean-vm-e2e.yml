@@ -2,7 +2,7 @@ name: Clean User VM DMG / Windows / Linux E2E Gate (Free Public Runner)
 
 on:
   release:
-    types: [published]
+    types: [published, prereleased]
   workflow_dispatch:
     inputs:
       release_tag:
@@ -12,7 +12,7 @@ on:
         type: string
 
 concurrency:
-  group: clean-vm-e2e-${{ github.workflow }}
+  group: clean-vm-e2e-${{ github.workflow }}-${{ github.event.release.tag_name || inputs.release_tag || 'latest' }}
   cancel-in-progress: true
 
 jobs:
@@ -127,11 +127,16 @@ jobs:
           path: test-artifacts/
 
   windows-native-smoke:
-    name: "Windows x64 Native Smoke (Checksum · Silent Install · --ci-selftest · Portable ZIP)"
+    name: "Windows x64 Real E2E (Checksum · Silent Install · --ci-selftest · NTFS SQLite & Unit Tests)"
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - name: 1. Download Windows Installer, Portable ZIP, OTA Manifest & Checksums
+      - name: 1. Checkout Public E2E Verification Harness (Zero App Source Code)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: 2. Download Windows Installer, Portable ZIP, OTA Manifest, Checksums & Optional Test Binaries
         env:
           GH_TOKEN: ${{ github.token }}
           TARGET_TAG: ${{ github.event.release.tag_name || inputs.release_tag || 'latest' }}
@@ -140,38 +145,50 @@ jobs:
           $ErrorActionPreference = "Stop"
           $dlDir = Join-Path $env:RUNNER_TEMP "vt-win"
           New-Item -ItemType Directory -Force -Path $dlDir | Out-Null
-          Set-Location $dlDir
-          if ($env:TARGET_TAG -eq "latest" -or [string]::IsNullOrWhiteSpace($env:TARGET_TAG)) {
-            gh release download --repo "$env:GITHUB_REPOSITORY" -p "ValidTeam-Setup.exe" -p "ValidTeam-windows-amd64.zip" -p "SHA256SUMS-windows.txt" -p "latest-windows.json" --clobber
-          } else {
-            gh release download "$env:TARGET_TAG" --repo "$env:GITHUB_REPOSITORY" -p "ValidTeam-Setup.exe" -p "ValidTeam-windows-amd64.zip" -p "SHA256SUMS-windows.txt" -p "latest-windows.json" --clobber
-          }
-          Get-Content SHA256SUMS-windows.txt
-          foreach ($line in Get-Content SHA256SUMS-windows.txt) {
-            if ($line -match '^([0-9a-fA-F]{64})\s+(.+)$') {
-              $expected = $Matches[1].ToLowerInvariant()
-              $file = $Matches[2].Trim()
-              if (Test-Path -LiteralPath $file) {
-                $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
-                if ($actual -ne $expected) {
-                  throw "SHA256 mismatch for ${file}: expected $expected, got $actual"
+          Push-Location $dlDir
+          try {
+            if ($env:TARGET_TAG -eq "latest" -or [string]::IsNullOrWhiteSpace($env:TARGET_TAG)) {
+              gh release download --repo "$env:GITHUB_REPOSITORY" -p "ValidTeam-Setup.exe" -p "ValidTeam-windows-amd64.zip" -p "SHA256SUMS-windows.txt" -p "latest-windows.json" --clobber
+            } else {
+              gh release download "$env:TARGET_TAG" --repo "$env:GITHUB_REPOSITORY" -p "ValidTeam-Setup.exe" -p "ValidTeam-windows-amd64.zip" -p "SHA256SUMS-windows.txt" -p "latest-windows.json" --clobber
+              gh release download "$env:TARGET_TAG" --repo "$env:GITHUB_REPOSITORY" -p "*.test.exe" --clobber 2>$null
+              $global:LASTEXITCODE = 0
+            }
+            Get-Content SHA256SUMS-windows.txt
+            foreach ($line in Get-Content SHA256SUMS-windows.txt) {
+              if ($line -match '^([0-9a-fA-F]{64})\s+(.+)$') {
+                $expected = $Matches[1].ToLowerInvariant()
+                $file = $Matches[2].Trim()
+                if (Test-Path -LiteralPath $file) {
+                  $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+                  if ($actual -ne $expected) {
+                    throw "SHA256 mismatch for ${file}: expected $expected, got $actual"
+                  }
+                  Write-Host "[OK] SHA256 verified for $file"
                 }
-                Write-Host "[OK] SHA256 verified for $file"
               }
             }
+            $winManifest = Get-Content -LiteralPath "latest-windows.json" -Raw | ConvertFrom-Json
+            $zipActual = (Get-FileHash -LiteralPath "ValidTeam-windows-amd64.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+            $setupActual = (Get-FileHash -LiteralPath "ValidTeam-Setup.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($winManifest.zip_sha256.ToLowerInvariant() -ne $zipActual) {
+              throw "latest-windows.json zip_sha256 mismatch"
+            }
+            if ($winManifest.setup_sha256.ToLowerInvariant() -ne $setupActual) {
+              throw "latest-windows.json setup_sha256 mismatch"
+            }
+            Write-Host "[OK] latest-windows.json verified (version=$($winManifest.version), build=$($winManifest.build))"
+          } finally {
+            Pop-Location
           }
-          $winManifest = Get-Content -LiteralPath "latest-windows.json" -Raw | ConvertFrom-Json
-          $zipActual = (Get-FileHash -LiteralPath "ValidTeam-windows-amd64.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
-          $setupActual = (Get-FileHash -LiteralPath "ValidTeam-Setup.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($winManifest.zip_sha256.ToLowerInvariant() -ne $zipActual) {
-            throw "latest-windows.json zip_sha256 mismatch"
-          }
-          if ($winManifest.setup_sha256.ToLowerInvariant() -ne $setupActual) {
-            throw "latest-windows.json setup_sha256 mismatch"
-          }
-          Write-Host "[OK] latest-windows.json verified (version=$($winManifest.version), build=$($winManifest.build))"
 
-      - name: 2. Silent Install ValidTeam-Setup.exe, --ci-selftest & --verify-ota-selftest
+      - name: 3. Silent Install ValidTeam-Setup.exe, --ci-selftest, --verify-ota-selftest & Real NTFS SQLite E2E
+        env:
+          VTEAM_TEST_API_KEY: ${{ secrets.VTEAM_TEST_API_KEY }}
+          VTEAM_TEST_API_NAME: ${{ vars.VTEAM_TEST_API_NAME || 'opencode-go' }}
+          VTEAM_TEST_API_FORMAT: ${{ vars.VTEAM_TEST_API_FORMAT || 'openai' }}
+          VTEAM_TEST_API_BASE_URL: ${{ vars.VTEAM_TEST_API_BASE_URL || 'https://opencode.ai/inference/go/openai/v1' }}
+          VTEAM_TEST_API_MODEL: ${{ vars.VTEAM_TEST_API_MODEL || 'deepseek-v4.1-flash' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -187,7 +204,7 @@ jobs:
           if (-not (Test-Path -LiteralPath $guiExe)) { throw "Missing $guiExe" }
           if (-not (Test-Path -LiteralPath $vteamExe)) { throw "Missing $vteamExe" }
 
-          # Stage an old backup marker to confirm startup cleanup
+          # Stage an old backup marker to confirm post-healthy startup cleanup
           Set-Content -LiteralPath (Join-Path $installDir "vteam.exe.old") -Value "stale" -Encoding ASCII
           $stOut = Join-Path $env:RUNNER_TEMP "selftest-out.txt"
           $stErr = Join-Path $env:RUNNER_TEMP "selftest-err.txt"
@@ -200,7 +217,7 @@ jobs:
             throw "ValidTeam.exe --ci-selftest failed (exit=$($stProc.ExitCode))"
           }
           if (Test-Path -LiteralPath (Join-Path $installDir "vteam.exe.old")) {
-            throw "vteam.exe.old was not cleaned up by ValidTeam.exe"
+            throw "vteam.exe.old was not cleaned up after healthy startup"
           }
           if (Get-Process -Name "vteam" -ErrorAction SilentlyContinue) {
             throw "Lingering vteam.exe process detected after ValidTeam.exe exit"
@@ -229,8 +246,13 @@ jobs:
           if (-not $portVteam) { throw "Portable ZIP missing vteam.exe" }
           & $portVteam.FullName --version
 
+          # Run real NTFS SQLite + Unit Tests + Backup/Export E2E script if present
+          if (Test-Path -LiteralPath "./scripts/windows_real_e2e.ps1") {
+            & ./scripts/windows_real_e2e.ps1 -InstallDir $installDir -DownloadDir $dlDir
+          }
+
   linux-native-smoke:
-    name: "Linux ${{ matrix.arch }} Native Smoke (clean tar extract · --help · 127.0.0.1:8787 -> 200)"
+    name: "Linux ${{ matrix.arch }} Native Smoke (clean tar · Canary Health · Real SQLite Project)"
     strategy:
       fail-fast: false
       matrix:
@@ -270,24 +292,38 @@ jobs:
           test "$(uname -m)" = "${{ matrix.uname }}"
           file "ValidTeam-linux-${{ matrix.arch }}/vteam"
 
-      - name: 3. Run ./vteam --help and default listen 127.0.0.1:8787 -> HTTP 200
+      - name: 3. Run ./vteam, verify /api/status canary_ok=true & create real SQLite project
         run: |
           set -euo pipefail
           cd ~/vt/ValidTeam-linux-${{ matrix.arch }}
           ./vteam --help | head -n 5
           ./vteam --version
-          export HOME="$(mktemp -d)"
-          ./vteam > "${RUNNER_TEMP}/vteam.log" 2>&1 &
+          TEST_HOME="$(mktemp -d)"
+          export HOME="${TEST_HOME}"
+          mkdir -p "${TEST_HOME}/ws"
+          printf 'default_model = "selftest/mock"\n\n[[api]]\nname = "selftest"\nformat = "openai"\nbase_url = "http://127.0.0.1:9/v1"\nkey = "sk-selftest-placeholder"\nmodels = ["mock"]\n' > "${TEST_HOME}/security.toml"
+          chmod 600 "${TEST_HOME}/security.toml"
+          ./vteam -root "${TEST_HOME}/ws" -security "${TEST_HOME}/security.toml" > "${RUNNER_TEMP}/vteam.log" 2>&1 &
           VT_PID=$!
-          CODE=000
-          for i in $(seq 1 30); do
-            CODE="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/ || true)"
-            [ "${CODE}" = "200" ] && break
-            sleep 1
+          trap 'kill "${VT_PID}" 2>/dev/null || true' EXIT
+          READY=0
+          for i in $(seq 1 40); do
+            STATUS_JSON="$(curl -fsS http://127.0.0.1:8787/api/status 2>/dev/null || true)"
+            if printf '%s' "${STATUS_JSON}" | grep -q '"daemon_health":"healthy"' && printf '%s' "${STATUS_JSON}" | grep -q '"canary_ok":true'; then
+              READY=1
+              break
+            fi
+            sleep 0.5
           done
           cat "${RUNNER_TEMP}/vteam.log"
-          kill "${VT_PID}" || true
-          if [ "${CODE}" != "200" ]; then
-            echo "❌ http://127.0.0.1:8787/ returned ${CODE}"; exit 1
+          if [ "${READY}" -ne 1 ]; then
+            echo "❌ /api/status did not reach canary_ok=true & daemon_health=healthy"; exit 1
           fi
-          echo "✅ Linux ${{ matrix.arch }}: ./vteam listens on 127.0.0.1:8787 and returns HTTP 200"
+          HDR_FILE="${RUNNER_TEMP}/linux-proj-hdr.txt"
+          curl -fsS -D "${HDR_FILE}" -o /dev/null -X POST -d "name=linux-smoke-proj" http://127.0.0.1:8787/projects
+          grep -qE '^HTTP/[0-9.]+ 303' "${HDR_FILE}"
+          grep -qiE '^Location:[[:space:]]*/projects/linux-smoke-proj' "${HDR_FILE}"
+          test -s "${TEST_HOME}/ws/linux-smoke-proj/state.db"
+          test -s "${TEST_HOME}/ws/linux-smoke-proj/.statedb_healthy.json"
+          kill "${VT_PID}" || true
+          echo "✅ Linux ${{ matrix.arch }}: ./vteam canary_ok=true, daemon_health=healthy & SQLite project verified"
