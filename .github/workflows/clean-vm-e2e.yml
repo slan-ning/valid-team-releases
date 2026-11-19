@@ -246,9 +246,9 @@ jobs:
           if (-not $portVteam) { throw "Portable ZIP missing vteam.exe" }
           & $portVteam.FullName --version
 
-          # Run real NTFS SQLite + Unit Tests + Backup/Export E2E script if present
+          # Run real NTFS SQLite + Unit Tests + Edge UI + Portable/Subst/Legacy E2E script if present
           if (Test-Path -LiteralPath "./scripts/windows_real_e2e.ps1") {
-            & ./scripts/windows_real_e2e.ps1 -InstallDir $installDir -DownloadDir $dlDir
+            & ./scripts/windows_real_e2e.ps1 -InstallDir $installDir -DownloadDir $dlDir -PortableDir $portDir
           }
 
   linux-native-smoke:
