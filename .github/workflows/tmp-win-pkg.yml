@@ -1,0 +1,215 @@
+name: Temporary Windows Packaging & Selftest
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_version:
+        required: true
+        type: string
+      build_number:
+        required: true
+        type: string
+      draft_tag:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  pkg-windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download staged Windows binaries & Inno Setup assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path stage, dist | Out-Null
+          $rel = gh api "repos/${{ github.repository }}/releases" --jq '.[] | select(.draft == true and .tag_name == "${{ inputs.draft_tag }}")' | ConvertFrom-Json
+          if (-not $rel) { throw "Draft release ${{ inputs.draft_tag }} not found" }
+          $asset = $rel.assets | Where-Object { $_.name -like "win-stage-*.tar.gz" } | Select-Object -First 1
+          if (-not $asset) { throw "Missing tarball asset in draft release" }
+          gh api -H "Accept: application/octet-stream" "repos/${{ github.repository }}/releases/assets/$($asset.id)" > stage\bundle.tar.gz
+          tar -xzf stage\bundle.tar.gz -C stage
+          Get-ChildItem -LiteralPath stage\ValidTeam
+
+      - name: Package Portable ZIP, Inno Setup Installer & Manifests + Run Selftests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+          $OutputEncoding = [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+
+          $appVer = "${{ inputs.app_version }}".TrimStart("v", "V")
+          $buildNo = "${{ inputs.build_number }}"
+          $releaseTag = "v$appVer"
+          $repoSlug = "${{ github.repository }}"
+
+          $stageDir = (Resolve-Path "stage\ValidTeam").Path
+          $winDir = (Resolve-Path "stage\windows").Path
+          $outDir = (Resolve-Path "dist").Path
+          $notesText = (Get-Content -LiteralPath "stage\release_notes.md" -Raw -Encoding UTF8).Trim()
+
+          Write-Host "==> [1/4] Creating Portable ZIP & Inno Setup Installer..."
+          $zipPath = Join-Path $outDir "ValidTeam-windows-amd64.zip"
+          Compress-Archive -Path $stageDir -DestinationPath $zipPath -Force
+
+          $isccPath = $null
+          foreach ($cand in @(
+              "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+              "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
+              "C:\ProgramData\chocolatey\bin\ISCC.exe"
+          )) {
+              if ($cand -and (Test-Path -LiteralPath $cand)) { $isccPath = $cand; break }
+          }
+          if (-not $isccPath) {
+              & choco install innosetup -y --no-progress | Out-Null
+              foreach ($cand in @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "${env:ProgramFiles}\Inno Setup 6\ISCC.exe")) {
+                  if (Test-Path -LiteralPath $cand) { $isccPath = $cand; break }
+              }
+          }
+          if (-not $isccPath) { throw "ISCC.exe not found" }
+
+          $issFile = Join-Path $winDir "installer.iss"
+          & $isccPath "/DMyAppVersion=$appVer" "/DMyBuildNumber=$buildNo" "/DSourceDir=$stageDir" "/DOutputDir=$outDir" $issFile
+          if ($LASTEXITCODE -ne 0) { throw "ISCC.exe failed ($LASTEXITCODE)" }
+
+          $setupPath = Join-Path $outDir "ValidTeam-Setup.exe"
+          if (-not (Test-Path -LiteralPath $setupPath)) { throw "Missing $setupPath" }
+
+          Write-Host "==> [2/4] Generating SHA256SUMS-windows.txt & latest-windows.json..."
+          $setupHash = (Get-FileHash -LiteralPath $setupPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $zipHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $setupSize = (Get-Item -LiteralPath $setupPath).Length
+          $zipSize = (Get-Item -LiteralPath $zipPath).Length
+
+          $sums = @(
+              "$setupHash  ValidTeam-Setup.exe",
+              "$zipHash  ValidTeam-windows-amd64.zip"
+          ) -join "`n"
+          [System.IO.File]::WriteAllText((Join-Path $outDir "SHA256SUMS-windows.txt"), ($sums + "`n"), [System.Text.UTF8Encoding]::new($false))
+
+          $pubDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          $manifestObj = [ordered]@{
+              version      = $appVer
+              build        = $buildNo
+              tag          = $releaseTag
+              pub_date     = $pubDate
+              published_at = $pubDate
+              zip_name     = "ValidTeam-windows-amd64.zip"
+              zip_url      = "https://github.com/$repoSlug/releases/download/$releaseTag/ValidTeam-windows-amd64.zip"
+              zip_sha256   = $zipHash
+              zip_size     = [int64]$zipSize
+              setup_name   = "ValidTeam-Setup.exe"
+              setup_url    = "https://github.com/$repoSlug/releases/download/$releaseTag/ValidTeam-Setup.exe"
+              setup_sha256 = $setupHash
+              setup_size   = [int64]$setupSize
+              sha256       = $zipHash
+              notes        = $notesText
+          }
+          $manifestJson = ($manifestObj | ConvertTo-Json -Depth 4) + "`n"
+          [System.IO.File]::WriteAllText((Join-Path $outDir "latest-windows.json"), $manifestJson, [System.Text.UTF8Encoding]::new($false))
+
+          Write-Host "==> [3/4] Running ValidTeam.exe --version & --ci-selftest..."
+          $runnerTemp = $env:RUNNER_TEMP
+          function Invoke-GuiCapture($exe, $argList, $tag) {
+              $o = Join-Path $runnerTemp "out-$tag.txt"
+              $e = Join-Path $runnerTemp "err-$tag.txt"
+              Remove-Item -LiteralPath $o, $e -Force -ErrorAction SilentlyContinue
+              $p = Start-Process -FilePath $exe -ArgumentList $argList -PassThru -RedirectStandardOutput $o -RedirectStandardError $e
+              if (-not $p.WaitForExit(45000)) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; throw "Timeout $tag" }
+              $p.WaitForExit()
+              return [pscustomobject]@{ ExitCode = $p.ExitCode; Stdout = [string](Get-Content -LiteralPath $o -Raw -ErrorAction SilentlyContinue); Stderr = [string](Get-Content -LiteralPath $e -Raw -ErrorAction SilentlyContinue) }
+          }
+
+          $newGuiExe = Join-Path $stageDir "ValidTeam.exe"
+          $vRes = Invoke-GuiCapture $newGuiExe @("--version") "ver"
+          Write-Host "Version output: $($vRes.Stdout)"
+          if ($vRes.ExitCode -ne 0 -or $vRes.Stdout -notmatch [regex]::Escape($appVer)) { throw "--version mismatch: $($vRes.Stdout)" }
+
+          $ciRes = Invoke-GuiCapture $newGuiExe @("--ci-selftest") "ci"
+          Write-Host $ciRes.Stdout
+          if ($ciRes.Stderr) { Write-Host $ciRes.Stderr }
+          if ($ciRes.ExitCode -ne 0 -or $ciRes.Stdout -notmatch "WIN_GUI_SELFTEST_OK") { throw "--ci-selftest failed ($($ciRes.ExitCode))" }
+
+          Write-Host "==> [4/4] Running v1.2.15 -> v$appVer OTA Selftest, Tampered SHA-256 Block & Same-Version Anti-Regression..."
+          $srvDir = Join-Path $runnerTemp "ota-srv"
+          New-Item -ItemType Directory -Force -Path $srvDir | Out-Null
+          Copy-Item -LiteralPath $setupPath, $zipPath -Destination $srvDir -Force
+
+          $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+          $listener.Start()
+          $port = ($listener.LocalEndpoint).Port
+          $listener.Stop()
+
+          $goodObj = [ordered]@{}
+          foreach ($k in $manifestObj.Keys) { $goodObj[$k] = $manifestObj[$k] }
+          $goodObj["zip_url"] = "http://127.0.0.1:$port/ValidTeam-windows-amd64.zip"
+          $goodObj["setup_url"] = "http://127.0.0.1:$port/ValidTeam-Setup.exe"
+          [System.IO.File]::WriteAllText((Join-Path $srvDir "latest-windows.json"), (($goodObj | ConvertTo-Json -Depth 4) + "`n"), [System.Text.UTF8Encoding]::new($false))
+
+          $badObj = [ordered]@{}
+          foreach ($k in $goodObj.Keys) { $badObj[$k] = $goodObj[$k] }
+          $badObj["zip_sha256"] = ("0" * 64)
+          $badObj["setup_sha256"] = ("0" * 64)
+          $badObj["sha256"] = ("0" * 64)
+          [System.IO.File]::WriteAllText((Join-Path $srvDir "bad-latest-windows.json"), (($badObj | ConvertTo-Json -Depth 4) + "`n"), [System.Text.UTF8Encoding]::new($false))
+
+          $psi = [System.Diagnostics.ProcessStartInfo]::new()
+          $psi.FileName = (Get-Command python).Source
+          $psi.Arguments = "-m http.server $port --bind 127.0.0.1"
+          $psi.WorkingDirectory = $srvDir
+          $psi.UseShellExecute = $false
+          $psi.CreateNoWindow = $true
+          $httpProc = [System.Diagnostics.Process]::Start($psi)
+
+          try {
+              Start-Sleep -Seconds 1
+              $oldZip = Join-Path $runnerTemp "v1.2.15-win.zip"
+              $oldDir = Join-Path $runnerTemp "v1.2.15-win"
+              Invoke-WebRequest -Uri "https://github.com/$repoSlug/releases/download/v1.2.15/ValidTeam-windows-amd64.zip" -OutFile $oldZip -UseBasicParsing
+              Expand-Archive -LiteralPath $oldZip -DestinationPath $oldDir -Force
+              $oldGuiExe = (Get-ChildItem -Path $oldDir -Filter "ValidTeam.exe" -Recurse | Select-Object -First 1).FullName
+
+              $env:VALID_TEAM_SECRET_BACKEND = "memory"
+              $env:VTEAM_WIN_OTA_CACHE_DIR = (Join-Path $runnerTemp "ota-cache")
+
+              # Negative: Tampered SHA-256
+              $env:VTEAM_WIN_OTA_MANIFEST_URL = "http://127.0.0.1:$port/bad-latest-windows.json"
+              $neg = Invoke-GuiCapture $oldGuiExe @("--verify-ota-selftest") "neg"
+              if ($neg.ExitCode -eq 0) { throw "Tampered SHA-256 was NOT blocked!" }
+              Write-Host "[OK] Tampered SHA-256 blocked (exit=$($neg.ExitCode))"
+
+              # Positive: v1.2.15 -> v1.2.16
+              $env:VTEAM_WIN_OTA_MANIFEST_URL = "http://127.0.0.1:$port/latest-windows.json"
+              $pos = Invoke-GuiCapture $oldGuiExe @("--verify-ota-selftest") "pos"
+              Write-Host $pos.Stdout
+              if ($pos.ExitCode -ne 0 -or $pos.Stdout -notmatch "WIN_OTA_SELFTEST_OK") { throw "Positive v1.2.15 -> v$appVer OTA selftest failed ($($pos.ExitCode)): $($pos.Stderr)" }
+
+              # Same-version anti-regression: v1.2.16 against v1.2.16 manifest
+              $same = Invoke-GuiCapture $newGuiExe @("--verify-ota-selftest") "same"
+              Write-Host "Same-version check exit=$($same.ExitCode) out=$($same.Stdout) err=$($same.Stderr)"
+              if ($same.ExitCode -eq 0 -and $same.Stdout -match "WIN_OTA_SELFTEST_OK") {
+                  throw "Same-version v$appVer unexpectedly treated itself as an upgrade!"
+              }
+              Write-Host "[OK] Same-version anti-regression gate passed!"
+          } finally {
+              if ($httpProc -and -not $httpProc.HasExited) { $httpProc.Kill() }
+          }
+
+          Get-ChildItem -LiteralPath $outDir | Format-Table Name, Length -AutoSize
+          Get-Content -LiteralPath (Join-Path $outDir "SHA256SUMS-windows.txt")
+
+      - name: Upload Windows Release Assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-windows-assets
+          retention-days: 1
+          path: |
+            dist/ValidTeam-Setup.exe
+            dist/ValidTeam-windows-amd64.zip
+            dist/SHA256SUMS-windows.txt
+            dist/latest-windows.json
