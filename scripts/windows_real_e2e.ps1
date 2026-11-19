@@ -182,8 +182,8 @@ try {
   $projDir = Assert-CreateProject $baseURL $e2eRoot $projName "inst1"
   Write-Utf8NoBom (Join-Path $projDir "workspace\分析报告\测试专题\summary.md") "# Windows E2E Deliverable`n"
 
-  $zipLen = Assert-ZipExport "$baseURL/projects/$encProj/export-backup" (Join-Path $env:RUNNER_TEMP "win-team-backup.zip") "Instance#1 normal"
-  $salvLen = Assert-ZipExport "$baseURL/projects/$encProj/export-backup?salvage=1" (Join-Path $env:RUNNER_TEMP "win-team-salvage.zip") "Instance#1 salvage"
+  $zipLen = Assert-ZipExport "${baseURL}/projects/${encProj}/export-backup" (Join-Path $env:RUNNER_TEMP "win-team-backup.zip") "Instance#1 normal"
+  $salvLen = Assert-ZipExport "${baseURL}/projects/${encProj}/export-backup?salvage=1" (Join-Path $env:RUNNER_TEMP "win-team-salvage.zip") "Instance#1 salvage"
   Write-Host "   [PASS] Real SQLite state.db + VACUUM INTO & ?salvage=1 export-backup succeeded ($zipLen / $salvLen bytes)"
 
   if (-not [string]::IsNullOrWhiteSpace($env:VTEAM_TEST_API_KEY)) {
@@ -266,8 +266,8 @@ try {
     $portProjName = "portable-跨盘项目"
     $encPortProj = [uri]::EscapeDataString($portProjName)
     Assert-CreateProject $baseURL2 $substRoot $portProjName "inst2" | Out-Null
-    Assert-ZipExport "$baseURL2/projects/$encPortProj/export-backup" (Join-Path $env:RUNNER_TEMP "win-portable-backup.zip") "Instance#2 portable" | Out-Null
-    Assert-ZipExport "$baseURL2/projects/broken-isolated/export-backup?salvage=1" (Join-Path $env:RUNNER_TEMP "win-broken-salvage.zip") "Instance#2 broken-salvage" | Out-Null
+    Assert-ZipExport "${baseURL2}/projects/${encPortProj}/export-backup" (Join-Path $env:RUNNER_TEMP "win-portable-backup.zip") "Instance#2 portable" | Out-Null
+    Assert-ZipExport "${baseURL2}/projects/broken-isolated/export-backup?salvage=1" (Join-Path $env:RUNNER_TEMP "win-broken-salvage.zip") "Instance#2 broken-salvage" | Out-Null
     Write-Host "   [PASS] Portable vteam.exe + subst ${substDrv}: cross-drive SQLite + isolated_project_count=1 + ?salvage=1 passed!"
   } elseif ($requirePortable) {
     throw "PortableDir was requested ('$PortableDir') but could not be resolved"
@@ -416,7 +416,7 @@ try {
   Invoke-CdpCommand "Log.enable" @{} | Out-Null
 
   # UI Check 1: Home / Workspace Rail
-  Navigate-CdpAndWait "$baseURL/"
+  Navigate-CdpAndWait "${baseURL}/"
   $homeCheck = Invoke-CdpEval "JSON.stringify({ rail: !!document.querySelector('.ws-rail'), badTokens: /\b(undefined|NaN)\b/.test(document.body ? document.body.innerText : '') })" | ConvertFrom-Json
   if (-not $homeCheck.rail -or $homeCheck.badTokens) {
     throw "Edge UI Check 1 (/) failed: ws-rail=$($homeCheck.rail) badTokens=$($homeCheck.badTokens)"
@@ -424,7 +424,7 @@ try {
   Write-Host "   [PASS] Edge UI Check 1 (/): .ws-rail rendered & zero undefined/NaN text"
 
   # UI Check 2: Cold-migrated legacy project overview & task detail drawer
-  Navigate-CdpAndWait "$baseURL/projects/$legacyEnc"
+  Navigate-CdpAndWait "${baseURL}/projects/${legacyEnc}"
   if (-not (Invoke-CdpEval "!!document.querySelector('#task-row-20261101T100000-leg01')")) {
     throw "Edge UI Check 2 (/projects/$legacyName) missing #task-row-20261101T100000-leg01"
   }
@@ -440,9 +440,10 @@ try {
   Write-Host "   [PASS] Edge UI Check 2 (/projects/$legacyName): #task-row-20261101T100000-leg01 + openTaskDetail drawer verified"
 
   # UI Check 3: Role chat draft persistence, sidebar badge, reload survival & dual-viewport zero overflow
-  Navigate-CdpAndWait "$baseURL/projects/$encProj?view=role&to=system"
-  if (-not (Invoke-CdpEval "!!(document.querySelector('#directive-form') && document.querySelector('#directive-body'))")) {
-    throw "Edge UI Check 3: #directive-form or #directive-body missing on role chat page"
+  Navigate-CdpAndWait "${baseURL}/projects/${encProj}?view=role&to=system"
+  $roleCheck = Invoke-CdpEval "JSON.stringify({ ok: !!(document.querySelector('#directive-form') && document.querySelector('#directive-body')), href: String(location.href || ''), title: String(document.title || '') })" | ConvertFrom-Json
+  if (-not $roleCheck.ok) {
+    throw "Edge UI Check 3: #directive-form or #directive-body missing on role chat page (href=$($roleCheck.href) title=$($roleCheck.title))"
   }
   $draftSavedJson = Invoke-CdpEval @'
 (function(){
@@ -478,7 +479,7 @@ try {
 
   # UI Check 4: Instance #2 Data Protection Mode page & dual-viewport zero overflow
   if ($baseURL2) {
-    Navigate-CdpAndWait "$baseURL2/projects/broken-isolated"
+    Navigate-CdpAndWait "${baseURL2}/projects/broken-isolated"
     $protCheckJson = Invoke-CdpEval @'
 (function(){
   var bodyTxt = document.body ? document.body.innerText : '';
