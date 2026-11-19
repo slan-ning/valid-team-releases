@@ -14,7 +14,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   pkg-windows:
@@ -32,7 +32,7 @@ jobs:
           if (-not $rel) { throw "Draft release ${{ inputs.draft_tag }} not found" }
           $asset = $rel.assets | Where-Object { $_.name -like "win-stage-*.tar.gz" } | Select-Object -First 1
           if (-not $asset) { throw "Missing tarball asset in draft release" }
-          gh api -H "Accept: application/octet-stream" "repos/${{ github.repository }}/releases/assets/$($asset.id)" > stage\bundle.tar.gz
+          curl.exe -fSL -H "Authorization: Bearer $env:GH_TOKEN" -H "Accept: application/octet-stream" "https://api.github.com/repos/${{ github.repository }}/releases/assets/$($asset.id)" -o stage\bundle.tar.gz
           tar -xzf stage\bundle.tar.gz -C stage
           Get-ChildItem -LiteralPath stage\ValidTeam
 
