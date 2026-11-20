@@ -1,0 +1,136 @@
+name: Temporary Windows Packaging & Selftest
+
+on:
+  workflow_dispatch:
+    inputs:
+      draft_id:
+        required: true
+        type: string
+      app_version:
+        required: true
+        type: string
+      build_number:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  pack-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Download stage tarball, package zip & Inno Setup installer, selftest & upload 4 assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT_ID: ${{ inputs.draft_id }}
+          APP_VERSION: ${{ inputs.app_version }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          RELEASE_REPO: valid-studio/valid-team-releases
+        run: |
+          $ErrorActionPreference = "Stop"
+          $work = Join-Path $env:RUNNER_TEMP "winpkg"
+          $stageRoot = Join-Path $work "stage"
+          $outDir = Join-Path $work "out"
+          New-Item -ItemType Directory -Force -Path $stageRoot, $outDir | Out-Null
+
+          $relJson = gh api "repos/$env:GITHUB_REPOSITORY/releases/$env:DRAFT_ID" | ConvertFrom-Json
+          $stageAsset = $relJson.assets | Where-Object { $_.name -eq "win-stage.tar.gz" } | Select-Object -First 1
+          if (-not $stageAsset) { throw "win-stage.tar.gz not found in draft $env:DRAFT_ID" }
+          $stageTar = Join-Path $work "win-stage.tar.gz"
+
+          & curl.exe -fsSL -H "Authorization: Bearer $env:GH_TOKEN" -H "Accept: application/octet-stream" -o $stageTar $stageAsset.url
+          if ($LASTEXITCODE -ne 0) { throw "curl.exe failed to download win-stage.tar.gz" }
+
+          & tar.exe -xzf $stageTar -C $stageRoot
+          if ($LASTEXITCODE -ne 0) { throw "tar.exe extract failed" }
+
+          $stageDir = Join-Path $stageRoot "ValidTeam"
+          $issFile = Join-Path $stageRoot "installer.iss"
+          $notesFile = Join-Path $stageRoot "release_notes.md"
+          $notesText = (Get-Content -LiteralPath $notesFile -Raw -Encoding UTF8).Trim()
+
+          # Quick version & selftest check before packaging
+          $vteamExe = Join-Path $stageDir "vteam.exe"
+          $guiExe = Join-Path $stageDir "ValidTeam.exe"
+          & $vteamExe --version
+          if ($LASTEXITCODE -ne 0) { throw "vteam.exe --version failed" }
+          $stOut = Join-Path $work "st-out.txt"
+          $stErr = Join-Path $work "st-err.txt"
+          $stProc = Start-Process -FilePath $guiExe -ArgumentList "--ci-selftest" -Wait -PassThru -RedirectStandardOutput $stOut -RedirectStandardError $stErr
+          if (Test-Path $stOut) { Get-Content $stOut }
+          if (Test-Path $stErr) { Get-Content $stErr }
+          if ($stProc.ExitCode -ne 0) { throw "ValidTeam.exe --ci-selftest failed (exit=$($stProc.ExitCode))" }
+
+          # Package Portable ZIP
+          $zipPath = Join-Path $outDir "ValidTeam-windows-amd64.zip"
+          Compress-Archive -Path $stageDir -DestinationPath $zipPath -Force
+
+          # Compile Inno Setup Installer
+          $isccPath = $null
+          $cmd = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
+          if ($cmd) { $isccPath = $cmd.Source }
+          if (-not $isccPath) {
+            foreach ($cand in @(
+              "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+              "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
+              "C:\ProgramData\chocolatey\bin\ISCC.exe"
+            )) {
+              if (Test-Path -LiteralPath $cand) { $isccPath = $cand; break }
+            }
+          }
+          if (-not $isccPath) { throw "ISCC.exe not found on windows-latest" }
+          & $isccPath "/DMyAppVersion=$env:APP_VERSION" "/DMyBuildNumber=$env:BUILD_NUMBER" "/DSourceDir=$stageDir" "/DOutputDir=$outDir" $issFile
+          if ($LASTEXITCODE -ne 0) { throw "ISCC.exe failed ($LASTEXITCODE)" }
+
+          $setupPath = Join-Path $outDir "ValidTeam-Setup.exe"
+          if (-not (Test-Path -LiteralPath $setupPath)) { throw "Missing ValidTeam-Setup.exe" }
+
+          # Generate SHA256SUMS-windows.txt & latest-windows.json
+          $setupHash = (Get-FileHash -LiteralPath $setupPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $zipHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $setupSize = (Get-Item -LiteralPath $setupPath).Length
+          $zipSize = (Get-Item -LiteralPath $zipPath).Length
+          $sums = @(
+            "$setupHash  ValidTeam-Setup.exe",
+            "$zipHash  ValidTeam-windows-amd64.zip"
+          ) -join "`n"
+          $sumsPath = Join-Path $outDir "SHA256SUMS-windows.txt"
+          [System.IO.File]::WriteAllText($sumsPath, ($sums + "`n"), [System.Text.UTF8Encoding]::new($false))
+
+          $pubDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          $releaseTag = "v$env:APP_VERSION"
+          $manifestObj = [ordered]@{
+            version      = $env:APP_VERSION
+            build        = $env:BUILD_NUMBER
+            tag          = $releaseTag
+            pub_date     = $pubDate
+            published_at = $pubDate
+            zip_name     = "ValidTeam-windows-amd64.zip"
+            zip_url      = "https://github.com/$env:RELEASE_REPO/releases/download/$releaseTag/ValidTeam-windows-amd64.zip"
+            zip_sha256   = $zipHash
+            zip_size     = [int64]$zipSize
+            setup_name   = "ValidTeam-Setup.exe"
+            setup_url    = "https://github.com/$env:RELEASE_REPO/releases/download/$releaseTag/ValidTeam-Setup.exe"
+            setup_sha256 = $setupHash
+            setup_size   = [int64]$setupSize
+            sha256       = $zipHash
+            notes        = $notesText
+          }
+          $manifestPath = Join-Path $outDir "latest-windows.json"
+          $manifestJson = ($manifestObj | ConvertTo-Json -Depth 4) + "`n"
+          [System.IO.File]::WriteAllText($manifestPath, $manifestJson, [System.Text.UTF8Encoding]::new($false))
+
+          # Upload 4 packaged assets back to the hidden draft via upload_url
+          $uploadBase = ($relJson.upload_url -replace '\{\?name,label\}$', '')
+          foreach ($fname in @("ValidTeam-Setup.exe", "ValidTeam-windows-amd64.zip", "SHA256SUMS-windows.txt", "latest-windows.json")) {
+            $fpath = Join-Path $outDir $fname
+            & curl.exe -fsSL --http1.1 -X POST `
+              -H "Authorization: Bearer $env:GH_TOKEN" `
+              -H "Content-Type: application/octet-stream" `
+              --data-binary "@$fpath" `
+              "${uploadBase}?name=${fname}" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Failed uploading $fname to draft" }
+            Write-Host "[OK] Uploaded $fname"
+          }
